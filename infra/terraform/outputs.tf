@@ -63,29 +63,29 @@ output "database_url" {
   sensitive   = true
 }
 
-# Phase Status Updated
-output "phase2_status" {
-  description = "Phase 2 deployment status"
+# Phase Status Updated for Final Phase
+output "phase3_status" {
+  description = "Phase 3 deployment status"
   value = {
-    phase        = "Phase 2: Security + ECR + Redis + RDS"
+    phase        = "Phase 3: Complete MVP - Security + ECR + RDS + ECS"
     status       = "Complete"
-    next_step    = "Uncomment ECS module in main.tf and run terraform apply for Phase 3"
+    next_step    = "Build and deploy DefectDojo application using app-deploy workflow"
     ecr_ready    = "Ready for Docker image builds"
     rds_ready    = "PostgreSQL database ready"
+    ecs_ready    = "EC2 Spot instances and ECS service ready"
     redis_status = var.enable_redis ? "Enabled" : "Disabled (using default for MVP)"
   }
 }
 
-# Commented outputs for future phases
-# Uncomment when enabling ECS module (Phase 3)
+# ECS Cluster Information (Phase 3 - enabled)
+output "ecs_cluster_name" {
+  description = "ECS cluster name"
+  value       = module.ecs.cluster_name
+}
 
-# # ECS Cluster (Phase 3)
-# output "ecs_cluster_name" {
-#   description = "ECS cluster name"
-#   value       = module.ecs.cluster_name
-# }
+output "ecs_service_name" {
+  description = "ECS service name"
+  value       = module.ecs.service_name
+}
 
-# output "ecs_service_name" {
-#   description = "ECS service name"
-#   value       = module.ecs.service_name
-# }
+# All phases complete - no commented outputs needed
