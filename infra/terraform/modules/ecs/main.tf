@@ -36,14 +36,6 @@ resource "aws_cloudwatch_log_group" "defectdojo" {
   tags = var.tags
 }
 
-# Instance profile - uses IAM role from security module
-resource "aws_iam_instance_profile" "ecs_instance_profile" {
-  name = "${var.project_name}-ecs-instance-profile"
-  role = var.ecs_instance_role_name
-
-  tags = var.tags
-}
-
 # Launch Template for EC2 Spot Instances
 resource "aws_launch_template" "ecs_spot" {
   name_prefix   = "${var.project_name}-ecs-spot-"
@@ -52,9 +44,9 @@ resource "aws_launch_template" "ecs_spot" {
 
   vpc_security_group_ids = var.security_group_ids
 
-  # IAM instance profile for ECS
+  # IAM instance profile for ECS - usar o existente do módulo security
   iam_instance_profile {
-    name = aws_iam_instance_profile.ecs_instance_profile.name
+    name = var.ecs_instance_profile_name
   }
 
   # Spot instance configuration

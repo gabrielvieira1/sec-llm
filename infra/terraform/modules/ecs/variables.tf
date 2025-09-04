@@ -25,6 +25,11 @@ variable "ecs_instance_role_name" {
   type        = string
 }
 
+variable "ecs_instance_profile_name" {
+  description = "Name of the IAM instance profile for ECS instances (from security module)"
+  type        = string
+}
+
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
