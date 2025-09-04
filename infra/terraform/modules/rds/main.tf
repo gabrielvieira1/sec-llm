@@ -16,7 +16,7 @@ resource "aws_db_instance" "main" {
 
   # Database Configuration
   engine         = "postgres"
-  engine_version = "15.7"
+  engine_version = "16.10" # Latest available PostgreSQL 16.x, compatible with DefectDojo
   instance_class = var.instance_class
 
   # Database Details
@@ -35,9 +35,9 @@ resource "aws_db_instance" "main" {
   vpc_security_group_ids = var.security_group_ids
   publicly_accessible    = false
 
-  # Backup Configuration (minimal for MVP)
-  backup_retention_period = 1
-  backup_window           = "03:00-04:00"
+  # Backup Configuration (DISABLED for MVP)
+  backup_retention_period = 0    # No backups for MVP
+  backup_window           = null # Not needed when backups disabled
   maintenance_window      = "sun:04:00-sun:05:00"
 
   # Skip final snapshot for MVP (change for production)
