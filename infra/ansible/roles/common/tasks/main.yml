@@ -1,0 +1,41 @@
+---
+# Common system configuration tasks
+
+- name: Update package cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: Install essential packages
+  apt:
+    name:
+      - curl
+      - wget
+      - git
+      - vim
+      - htop
+      - unzip
+      - software-properties-common
+    state: present
+
+- name: Configure timezone
+  timezone:
+    name: "{{ timezone | default('UTC') }}"
+
+- name: Create application user
+  user:
+    name: "{{ app_user | default('defectdojo') }}"
+    shell: /bin/bash
+    create_home: yes
+    
+- name: Configure SSH security
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backup: yes
+  with_items:
+    - { regexp: '^PasswordAuthentication', line: 'PasswordAuthentication no' }
+    - { regexp: '^PermitRootLogin', line: 'PermitRootLogin no' }
+  notify: restart ssh

@@ -1,0 +1,22 @@
+[defectdojo]
+# Production DefectDojo servers
+defectdojo-prod-01 ansible_host=10.0.1.10 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/defectdojo_key
+
+[database]
+# Database servers
+db-prod-01 ansible_host=10.0.1.20 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/defectdojo_key
+
+[redis]
+# Redis cache servers
+redis-prod-01 ansible_host=10.0.1.30 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/defectdojo_key
+
+[production:children]
+defectdojo
+database
+redis
+
+[production:vars]
+env=production
+domain=defectdojo.empresa.com
+ssl_enabled=true
+backup_enabled=true

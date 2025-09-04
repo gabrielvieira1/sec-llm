@@ -1,0 +1,41 @@
+---
+- name: Deploy DefectDojo Infrastructure
+  hosts: defectdojo
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    defectdojo_version: "2.25.1"
+    python_version: "3.11"
+    nodejs_version: "18"
+    
+  roles:
+    - common
+    - docker
+    - defectdojo
+    - nginx
+    - ssl
+    
+  tasks:
+    - name: Ensure DefectDojo is running
+      docker_compose:
+        project_src: /opt/defectdojo
+        state: present
+      tags:
+        - deploy
+        - defectdojo
+        
+    - name: Run DefectDojo initializer
+      command: docker exec defectdojo-uwsgi python manage.py initialize
+      run_once: true
+      tags:
+        - initialize
+        
+    - name: Create superuser
+      command: |
+        docker exec defectdojo-uwsgi python manage.py createsuperuser \
+        --username admin --email admin@localhost --noinput
+      run_once: true
+      ignore_errors: yes
+      tags:
+        - setup

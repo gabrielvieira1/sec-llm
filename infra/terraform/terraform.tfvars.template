@@ -1,0 +1,30 @@
+# Example terraform.tfvars file
+# Copy this to terraform.tfvars and customize for your environment
+
+# Project Configuration
+project_name = "sec-llm-infra"
+environment  = "production"
+aws_region   = "us-east-1"
+
+# Network Configuration
+web_allowed_cidrs = ["0.0.0.0/0"]  # Replace with your IP: ["your.ip.address/32"]
+
+# ECS Configuration
+ecs_cpu         = 1024      # 1 vCPU
+ecs_memory      = 2048      # 2 GB RAM
+desired_count   = 1         # Number of running tasks
+min_capacity    = 1         # Minimum tasks for auto-scaling
+max_capacity    = 3         # Maximum tasks for auto-scaling
+
+# RDS Configuration
+db_instance_class = "db.t3.micro"    # For production: db.t3.small or larger
+db_name          = "defectdojo"
+db_username      = "defectdojo"
+# db_password will be set via environment variable or GitHub secrets
+
+# Redis Configuration
+redis_node_type = "cache.t3.micro"   # For production: cache.t3.small or larger
+
+# Optional: Domain and SSL Configuration
+# domain_name     = "defectdojo.yourdomain.com"
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/your-cert-id"

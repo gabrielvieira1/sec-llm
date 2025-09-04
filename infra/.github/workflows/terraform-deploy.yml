@@ -1,0 +1,299 @@
+name: "DefectDojo ECS Infrastructure Deploy"
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform Action"
+        required: true
+        default: "plan"
+        type: choice
+        options:
+          - "plan"
+          - "apply"
+          - "destroy"
+
+      auto_approve:
+        description: "Auto approve (skip manual approval for apply/destroy)"
+        required: false
+        default: false
+        type: boolean
+
+      build_images:
+        description: "Build and push Docker images to ECR"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  id-token: write # Required for AWS OIDC
+  contents: read # Required for checkout
+  pull-requests: write # Required for PR comments
+  issues: write # Required for issue comments
+
+env:
+  AWS_REGION: "us-east-1"
+  TF_VAR_project_name: "defectdojo-mvp"
+
+jobs:
+  terraform:
+    name: "Terraform ${{ inputs.action }}"
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./terraform
+
+    outputs:
+      django_repo_url: ${{ steps.terraform_outputs.outputs.django_repo_url }}
+      nginx_repo_url: ${{ steps.terraform_outputs.outputs.nginx_repo_url }}
+
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: "Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-TerraformDeploy
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - name: "Setup Terraform"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: "Terraform Format Check"
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: "Terraform Init"
+        id: init
+        run: |
+          terraform init \
+            -backend-config="bucket=defectdojo-mvp-terraform-state" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="encrypt=true"
+
+      - name: "Terraform Validate"
+        id: validate
+        run: terraform validate -no-color
+
+      - name: "Terraform Plan"
+        id: plan
+        run: |
+          if [ "${{ inputs.action }}" == "destroy" ]; then
+            terraform plan -destroy -no-color -input=false \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="db_password=${{ secrets.DB_PASSWORD }}" \
+              -out=tfplan
+          else
+            terraform plan -no-color -input=false \
+              -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="db_password=${{ secrets.DB_PASSWORD }}" \
+              -out=tfplan
+          fi
+        continue-on-error: false
+
+      - name: "Comment Plan on PR/Issue"
+        uses: actions/github-script@v7
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PLAN: "${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `
+            ### Terraform ${{ inputs.action }} Results 🚀
+
+            #### Terraform Format and Style 🖌: \`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️: \`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖: \`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖: \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            **Action**: ${{ inputs.action }}
+            **Auto Approve**: ${{ inputs.auto_approve }}
+            **Build Images**: ${{ inputs.build_images }}
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*
+            `;
+
+            // If this is triggered manually, create an issue comment
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            });
+
+      - name: "Manual Approval for Apply/Destroy"
+        if: |
+          (inputs.action == 'apply' || inputs.action == 'destroy') && 
+          inputs.auto_approve == false
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}
+          approvers: ${{ github.actor }}
+          minimum-approvals: 1
+          issue-title: "🚨 Manual approval required for Terraform ${{ inputs.action }}"
+          issue-body: |
+            ## ⚠️ Terraform ${{ inputs.action }} requires manual approval
+
+            **Action**: `${{ inputs.action }}`
+            **Build Images**: `${{ inputs.build_images }}`
+            **Triggered by**: @${{ github.actor }}
+
+            ### Plan Summary
+            Please review the Terraform plan above before approving.
+
+            **To approve**: Comment `approved`, `approve`, `lgtm`, or `yes`
+            **To deny**: Comment `denied`, `deny`, `no`, or close this issue
+
+            ⏱️ **Timeout**: This approval will timeout in 30 minutes
+          exclude-workflow-initiator-as-approver: false
+
+      - name: "Terraform Apply"
+        id: apply
+        if: |
+          inputs.action == 'apply' && 
+          steps.plan.outcome == 'success'
+        run: |
+          terraform apply -auto-approve -input=false tfplan
+        continue-on-error: false
+
+      - name: "Terraform Destroy"
+        id: destroy
+        if: |
+          inputs.action == 'destroy' && 
+          steps.plan.outcome == 'success'
+        run: |
+          terraform apply -auto-approve -input=false tfplan
+        continue-on-error: false
+
+      - name: "Get Terraform Outputs"
+        id: terraform_outputs
+        if: inputs.action == 'apply' && steps.apply.outcome == 'success'
+        run: |
+          echo "django_repo_url=$(terraform output -raw ecr_repositories | jq -r '.django')" >> $GITHUB_OUTPUT
+          echo "nginx_repo_url=$(terraform output -raw ecr_repositories | jq -r '.nginx')" >> $GITHUB_OUTPUT
+
+      - name: "Terraform Output"
+        id: output
+        if: inputs.action == 'apply' && steps.apply.outcome == 'success'
+        run: |
+          echo "## Terraform Outputs" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          terraform output >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Upload Terraform Plan Artifact"
+        uses: actions/upload-artifact@v4
+        if: steps.plan.outcome == 'success'
+        with:
+          name: terraform-plan-${{ github.run_number }}
+          path: |
+            terraform/tfplan
+            terraform/.terraform.lock.hcl
+          retention-days: 30
+
+      - name: "Clean up on failure"
+        if: failure()
+        run: |
+          echo "🚨 Workflow failed. Cleaning up..."
+          rm -f tfplan
+          echo "::error::Terraform ${{ inputs.action }} failed. Check the logs above."
+
+      - name: "Success Notification"
+        if: success()
+        run: |
+          echo "✅ Terraform ${{ inputs.action }} completed successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "**Action**: ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
+
+  build-and-push:
+    name: "Build and Push Docker Images"
+    runs-on: ubuntu-latest
+    needs: terraform
+    if: |
+      inputs.action == 'apply' && 
+      inputs.build_images == true && 
+      needs.terraform.result == 'success'
+
+    steps:
+      - name: "Checkout DefectDojo Repository"
+        uses: actions/checkout@v4
+        with:
+          repository: "DefectDojo/django-DefectDojo"
+          path: "django-DefectDojo"
+
+      - name: "Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-ECRPush
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Login to Amazon ECR"
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+
+      - name: "Build and push Django image"
+        working-directory: ./django-DefectDojo
+        run: |
+          DJANGO_REPO_URL="${{ needs.terraform.outputs.django_repo_url }}"
+          echo "Building Django image for repository: $DJANGO_REPO_URL"
+
+          docker build \
+            -f Dockerfile.django-debian \
+            --target django \
+            --platform linux/amd64 \
+            -t $DJANGO_REPO_URL:latest \
+            -t $DJANGO_REPO_URL:${{ github.sha }} \
+            .
+            
+          docker push $DJANGO_REPO_URL:latest
+          docker push $DJANGO_REPO_URL:${{ github.sha }}
+
+      - name: "Build and push Nginx image"
+        working-directory: ./django-DefectDojo
+        run: |
+          NGINX_REPO_URL="${{ needs.terraform.outputs.nginx_repo_url }}"
+          echo "Building Nginx image for repository: $NGINX_REPO_URL"
+
+          docker build \
+            -f Dockerfile.nginx-alpine \
+            --platform linux/amd64 \
+            -t $NGINX_REPO_URL:latest \
+            -t $NGINX_REPO_URL:${{ github.sha }} \
+            .
+            
+          docker push $NGINX_REPO_URL:latest
+          docker push $NGINX_REPO_URL:${{ github.sha }}
+
+      - name: "Update ECS Service"
+        run: |
+          # Force new deployment of ECS service to use new images
+          aws ecs update-service \
+            --cluster ${{ env.TF_VAR_project_name }}-cluster \
+            --service ${{ env.TF_VAR_project_name }}-service \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+          echo "✅ ECS service updated with new images!" >> $GITHUB_STEP_SUMMARY
