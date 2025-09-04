@@ -56,18 +56,18 @@ module "ecr" {
 }
 
 # RDS Module - PostgreSQL Database (simplified)
-# Comentado para Fase 1 - vamos testar incrementalmente
-# module "rds" {
-#   source = "./modules/rds"
+# Fase 2 - Banco de dados habilitado
+module "rds" {
+  source = "./modules/rds"
 
-#   project_name       = var.project_name
-#   vpc_id             = data.aws_vpc.default.id
-#   subnet_ids         = data.aws_subnets.default.ids
-#   security_group_ids = [module.security.rds_sg_id]
-#   instance_class     = var.db_instance_class
-#   db_password        = var.db_password
-#   tags               = local.common_tags
-# }
+  project_name       = var.project_name
+  vpc_id             = data.aws_vpc.default.id
+  subnet_ids         = data.aws_subnets.default.ids
+  security_group_ids = [module.security.rds_sg_id]
+  instance_class     = var.db_instance_class
+  db_password        = var.db_password
+  tags               = local.common_tags
+}
 
 # Redis Module - ElastiCache (optional for MVP)
 module "redis" {

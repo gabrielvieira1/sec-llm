@@ -50,33 +50,34 @@ output "redis_url" {
   sensitive   = false
 }
 
-# Phase 1 Status
-output "phase1_status" {
-  description = "Phase 1 deployment status"
+# RDS Database (Phase 2 - enabled)
+output "rds_endpoint" {
+  description = "RDS PostgreSQL endpoint"
+  value       = module.rds.endpoint
+  sensitive   = true
+}
+
+output "database_url" {
+  description = "Complete database URL for DefectDojo"
+  value       = module.rds.database_url
+  sensitive   = true
+}
+
+# Phase Status Updated
+output "phase2_status" {
+  description = "Phase 2 deployment status"
   value = {
-    phase        = "Phase 1: Security + ECR + Redis"
+    phase        = "Phase 2: Security + ECR + Redis + RDS"
     status       = "Complete"
-    next_step    = "Uncomment RDS module in main.tf and run terraform apply for Phase 2"
+    next_step    = "Uncomment ECS module in main.tf and run terraform apply for Phase 3"
     ecr_ready    = "Ready for Docker image builds"
+    rds_ready    = "PostgreSQL database ready"
     redis_status = var.enable_redis ? "Enabled" : "Disabled (using default for MVP)"
   }
 }
 
 # Commented outputs for future phases
-# Uncomment when enabling RDS module
-
-# # RDS Database (Phase 2)
-# output "rds_endpoint" {
-#   description = "RDS PostgreSQL endpoint"
-#   value       = module.rds.endpoint
-#   sensitive   = true
-# }
-
-# output "database_url" {
-#   description = "Complete database URL for DefectDojo"
-#   value       = module.rds.database_url
-#   sensitive   = true
-# }
+# Uncomment when enabling ECS module (Phase 3)
 
 # # ECS Cluster (Phase 3)
 # output "ecs_cluster_name" {
