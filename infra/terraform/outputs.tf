@@ -1,4 +1,4 @@
-# DefectDojo MVP Outputs
+# DefectDojo MVP Outputs - Phase 1: Security + ECR + Redis (optional)
 
 # ECR Repository URLs
 output "django_repository_url" {
@@ -19,31 +19,25 @@ output "ecr_repositories" {
   }
 }
 
-# DefectDojo Access Information
-output "defectdojo_access_info" {
-  description = "Information to access DefectDojo"
+# Security Groups
+output "security_groups" {
+  description = "Created security group IDs"
   value = {
-    admin_username = "admin"
-    admin_password = "DefectDojoMVP2024!"
-    admin_email    = "admin@defectdojo.local"
-    note           = "Access via EC2 public IPs on port 80. Check ECS service for instance IPs."
+    ecs_sg_id = module.security.ecs_sg_id
+    rds_sg_id = module.security.rds_sg_id
   }
 }
 
-# RDS Database
-output "rds_endpoint" {
-  description = "RDS PostgreSQL endpoint"
-  value       = module.rds.endpoint
-  sensitive   = true
+# IAM Roles
+output "iam_roles" {
+  description = "Created IAM role ARNs"
+  value = {
+    ecs_execution_role = module.security.ecs_execution_role_arn
+    ecs_task_role      = module.security.ecs_task_role_arn
+  }
 }
 
-output "database_url" {
-  description = "Complete database URL for DefectDojo"
-  value       = module.rds.database_url
-  sensitive   = true
-}
-
-# Redis Cache (optional for MVP)
+# Redis Cache (Phase 1 - optional)
 output "redis_endpoint" {
   description = "ElastiCache Redis endpoint"
   value       = var.enable_redis ? module.redis[0].endpoint : "Redis not enabled for MVP"
@@ -56,49 +50,41 @@ output "redis_url" {
   sensitive   = false
 }
 
-# ECS Cluster Information
-output "ecs_cluster_name" {
-  description = "ECS cluster name"
-  value       = module.ecs.cluster_name
+# Phase 1 Status
+output "phase1_status" {
+  description = "Phase 1 deployment status"
+  value = {
+    phase        = "Phase 1: Security + ECR + Redis"
+    status       = "Complete"
+    next_step    = "Uncomment RDS module in main.tf and run terraform apply for Phase 2"
+    ecr_ready    = "Ready for Docker image builds"
+    redis_status = var.enable_redis ? "Enabled" : "Disabled (using default for MVP)"
+  }
 }
 
-output "ecs_service_name" {
-  description = "ECS service name"
-  value       = module.ecs.service_name
-}
+# Commented outputs for future phases
+# Uncomment when enabling RDS module
 
-# Access Information
-output "access_instructions" {
-  description = "How to access your DefectDojo MVP"
-  value       = <<-EOT
-    
-    🚀 DefectDojo MVP Deployment Complete!
-    
-    📋 Next Steps:
-    
-    1. Build and push images:
-       ./build-and-push.sh
-    
-    2. Find your EC2 instance public IPs:
-       - Go to AWS Console → EC2 → Instances
-       - Look for instances tagged: ${module.ecs.cluster_name}
-    
-    3. Access DefectDojo:
-       - URL: http://<EC2-PUBLIC-IP>
-       - Default login: admin/admin
-       - Port: 80 (HTTP)
-    
-    💡 Tips:
-    - Without ALB, you access directly via EC2 instance IPs
-    - If one instance is down, try another instance IP
-    - Check ECS service status in AWS Console
-    
-    🔧 Resources Created:
-    - ECS Cluster: ${module.ecs.cluster_name}
-    - Database: ${module.rds.endpoint}
-    - ECR Repos: Django & Nginx
-    - EC2 Spot instances: 2-3 instances
-    
-    💰 Estimated cost: ~$50/month
-  EOT
-}
+# # RDS Database (Phase 2)
+# output "rds_endpoint" {
+#   description = "RDS PostgreSQL endpoint"
+#   value       = module.rds.endpoint
+#   sensitive   = true
+# }
+
+# output "database_url" {
+#   description = "Complete database URL for DefectDojo"
+#   value       = module.rds.database_url
+#   sensitive   = true
+# }
+
+# # ECS Cluster (Phase 3)
+# output "ecs_cluster_name" {
+#   description = "ECS cluster name"
+#   value       = module.ecs.cluster_name
+# }
+
+# output "ecs_service_name" {
+#   description = "ECS service name"
+#   value       = module.ecs.service_name
+# }
