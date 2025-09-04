@@ -77,6 +77,20 @@ variable "task_role_arn" {
   type        = string
 }
 
+variable "django_secret_key" {
+  description = "Django secret key for cryptographic operations"
+  type        = string
+  sensitive   = true
+  default     = "hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq-MVP-DEFAULT"
+}
+
+variable "django_aes_key" {
+  description = "Django AES key for credential encryption"
+  type        = string
+  sensitive   = true
+  default     = "&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw"
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

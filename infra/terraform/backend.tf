@@ -11,11 +11,11 @@ terraform {
     }
   }
 
-  # backend "s3" {
-  #   bucket       = "sec-llm-infra-terraform-state"
-  #   key          = "terraform.tfstate"
-  #   region       = "us-east-1"
-  #   encrypt      = true
-  #   use_lockfile = true
-  # }
+  backend "s3" {
+    bucket       = "sec-llm-infra-terraform-state"
+    key          = "terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
 }

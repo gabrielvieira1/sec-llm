@@ -11,6 +11,25 @@ output "nginx_repository_url" {
   value       = module.ecr.nginx_repository_url
 }
 
+output "ecr_repositories" {
+  description = "ECR repository URLs"
+  value = {
+    django = module.ecr.django_repository_url
+    nginx  = module.ecr.nginx_repository_url
+  }
+}
+
+# DefectDojo Access Information
+output "defectdojo_access_info" {
+  description = "Information to access DefectDojo"
+  value = {
+    admin_username = "admin"
+    admin_password = "DefectDojoMVP2024!"
+    admin_email    = "admin@defectdojo.local"
+    note           = "Access via EC2 public IPs on port 80. Check ECS service for instance IPs."
+  }
+}
+
 # RDS Database
 output "rds_endpoint" {
   description = "RDS PostgreSQL endpoint"

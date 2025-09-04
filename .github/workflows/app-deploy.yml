@@ -1,0 +1,145 @@
+name: "DefectDojo Application Build & Deploy"
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Force ECS service deployment"
+        required: false
+        default: true
+        type: boolean
+
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+
+permissions:
+  id-token: write # Required for AWS OIDC
+  contents: read # Required for checkout
+
+env:
+  AWS_REGION: "us-east-1"
+  PROJECT_NAME: "defectdojo-mvp"
+
+jobs:
+  build-and-deploy:
+    name: "Build and Deploy DefectDojo"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GithubInfraRole-AppDeploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Get ECR Registry and Repositories"
+        id: ecr_info
+        run: |
+          # Get AWS Account ID
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+
+          # Set environment variables for use in subsequent steps
+          echo "ECR_REGISTRY=${ECR_REGISTRY}" >> $GITHUB_ENV
+          echo "DJANGO_REPO=${ECR_REGISTRY}/${{ env.PROJECT_NAME }}/django" >> $GITHUB_ENV
+          echo "NGINX_REPO=${ECR_REGISTRY}/${{ env.PROJECT_NAME }}/nginx" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: "Login to Amazon ECR"
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+
+      - name: "Build and push Django image"
+        working-directory: ./app
+        run: |
+          echo "🔨 Building Django image: $DJANGO_REPO"
+
+          docker build \
+            -f Dockerfile.django-alpine \
+            --target django \
+            --platform linux/amd64 \
+            -t $DJANGO_REPO:$IMAGE_TAG \
+            -t $DJANGO_REPO:latest \
+            .
+
+          echo "📤 Pushing Django image..."
+          docker push $DJANGO_REPO:$IMAGE_TAG
+          docker push $DJANGO_REPO:latest
+
+          echo "✅ Django image: $DJANGO_REPO:$IMAGE_TAG"
+
+      - name: "Build and push Nginx image"
+        working-directory: ./app
+        run: |
+          echo "🔨 Building Nginx image: $NGINX_REPO"
+
+          docker build \
+            -f Dockerfile.nginx-alpine \
+            --platform linux/amd64 \
+            -t $NGINX_REPO:$IMAGE_TAG \
+            -t $NGINX_REPO:latest \
+            .
+
+          echo "📤 Pushing Nginx image..."
+          docker push $NGINX_REPO:$IMAGE_TAG
+          docker push $NGINX_REPO:latest
+
+          echo "✅ Nginx image: $NGINX_REPO:$IMAGE_TAG"
+
+      - name: "Deploy to ECS"
+        if: inputs.force_deploy == true || github.event_name == 'push'
+        run: |
+          echo "🚀 Deploying to ECS..."
+
+          # Force new deployment
+          aws ecs update-service \
+            --cluster ${{ env.PROJECT_NAME }}-cluster \
+            --service ${{ env.PROJECT_NAME }}-service \
+            --force-new-deployment
+
+          echo "✅ ECS deployment initiated"
+
+      - name: "Get Access Information"
+        run: |
+          # Get running instances
+          INSTANCE_IDS=$(aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+                     "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text 2>/dev/null || echo "")
+
+          echo "## 🚀 DefectDojo Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Images built and pushed:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Django: \`$DJANGO_REPO:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Nginx: \`$NGINX_REPO:$IMAGE_TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -n "$INSTANCE_IDS" ]; then
+            echo "**Access URLs:**" >> $GITHUB_STEP_SUMMARY
+            for instance_id in $INSTANCE_IDS; do
+              PUBLIC_IP=$(aws ec2 describe-instances \
+                --instance-ids $instance_id \
+                --query 'Reservations[0].Instances[0].PublicIpAddress' \
+                --output text 2>/dev/null || echo "None")
+              
+              if [ "$PUBLIC_IP" != "None" ] && [ "$PUBLIC_IP" != "" ]; then
+                echo "- http://$PUBLIC_IP/ (Instance: $instance_id)" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          else
+            echo "**Note:** No running instances found. Deploy infrastructure first." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Login Credentials:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Username: \`admin\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Password: \`DefectDojoMVP2024!\`" >> $GITHUB_STEP_SUMMARY

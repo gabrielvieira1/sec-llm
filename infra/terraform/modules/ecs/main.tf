@@ -173,6 +173,24 @@ resource "aws_ssm_parameter" "database_url" {
   tags = var.tags
 }
 
+# Store Django Secret Key in SSM Parameter Store
+resource "aws_ssm_parameter" "django_secret_key" {
+  name  = "/${var.project_name}/django_secret_key"
+  type  = "SecureString"
+  value = var.django_secret_key
+
+  tags = var.tags
+}
+
+# Store Django AES Key in SSM Parameter Store  
+resource "aws_ssm_parameter" "django_aes_key" {
+  name  = "/${var.project_name}/django_aes_key"
+  type  = "SecureString"
+  value = var.django_aes_key
+
+  tags = var.tags
+}
+
 # Store Redis URL in SSM Parameter Store (optional)
 resource "aws_ssm_parameter" "redis_url" {
   count = var.redis_url != "" ? 1 : 0
@@ -183,7 +201,7 @@ resource "aws_ssm_parameter" "redis_url" {
   tags = var.tags
 }
 
-# ECS Task Definition - Simplified for MVP
+# ECS Task Definition - Simplificada para MVP
 resource "aws_ecs_task_definition" "defectdojo" {
   family                   = "${var.project_name}-defectdojo"
   requires_compatibilities = ["EC2"]
@@ -191,15 +209,15 @@ resource "aws_ecs_task_definition" "defectdojo" {
   execution_role_arn       = var.execution_role_arn
   task_role_arn            = var.task_role_arn
 
-  # Simplified container definition focusing on core functionality
+  # Container definitions baseadas no docker-compose.yml do DefectDojo
   container_definitions = jsonencode([
     {
       name  = "nginx"
-      image = var.nginx_image_uri
+      image = "${var.nginx_image_uri}:latest"
       portMappings = [
         {
           containerPort = 8080
-          hostPort      = 80 # Map to port 80 on host for easy access
+          hostPort      = 80 # Expor na porta 80 do host
           protocol      = "tcp"
         }
       ]
@@ -223,6 +241,7 @@ resource "aws_ecs_task_definition" "defectdojo" {
           "awslogs-stream-prefix" = "nginx"
         }
       }
+      # Compartilhar volumes com Django
       volumesFrom = [
         {
           sourceContainer = "django"
@@ -232,7 +251,7 @@ resource "aws_ecs_task_definition" "defectdojo" {
     },
     {
       name  = "django"
-      image = var.django_image_uri
+      image = "${var.django_image_uri}:latest"
       portMappings = [
         {
           containerPort = 3031
@@ -247,28 +266,52 @@ resource "aws_ecs_task_definition" "defectdojo" {
         },
         {
           name  = "DD_ALLOWED_HOSTS"
-          value = "*" # Allow all hosts for MVP
+          value = "*"
         },
-        {
-          name  = "DD_SECRET_KEY"
-          value = "hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq" # Change for production
-        },
-        {
-          name  = "DD_CREDENTIAL_AES_256_KEY"
-          value = "&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw" # Change for production
-        },
-        # Use SQLite for MVP simplicity - or database if available
         {
           name  = "DD_DATABASE_ENGINE"
           value = "django.db.backends.postgresql"
+        },
+        # Admin user configuration
+        {
+          name  = "DD_ADMIN_USER"
+          value = "admin"
+        },
+        {
+          name  = "DD_ADMIN_MAIL"
+          value = "admin@defectdojo.local"
+        },
+        {
+          name  = "DD_ADMIN_FIRST_NAME"
+          value = "DefectDojo"
+        },
+        {
+          name  = "DD_ADMIN_LAST_NAME"
+          value = "Admin"
+        },
+        {
+          name  = "DD_ADMIN_PASSWORD"
+          value = "DefectDojoMVP2024!" # Senha fixa para MVP - mostrar nos logs
+        },
+        {
+          name  = "DD_INITIALIZE"
+          value = "true"
         }
       ]
       secrets = [
         {
           name      = "DD_DATABASE_URL"
           valueFrom = aws_ssm_parameter.database_url.arn
+        },
+        {
+          name      = "DD_SECRET_KEY"
+          valueFrom = aws_ssm_parameter.django_secret_key.arn
+        },
+        {
+          name      = "DD_CREDENTIAL_AES_256_KEY"
+          valueFrom = aws_ssm_parameter.django_aes_key.arn
         }
-        # Only add Redis URL if available
+        # Redis URL será adicionado quando habilitado
       ]
       logConfiguration = {
         logDriver = "awslogs"

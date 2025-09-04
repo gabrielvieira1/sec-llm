@@ -25,6 +25,21 @@ variable "db_instance_class" {
   default     = "db.t3.micro"
 }
 
+# Django Security Configuration
+variable "django_secret_key" {
+  description = "Django secret key for cryptographic operations"
+  type        = string
+  sensitive   = true
+  default     = "hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq-CHANGE-FOR-PRODUCTION"
+}
+
+variable "django_aes_key" {
+  description = "Django AES key for credential encryption (32 chars)"
+  type        = string
+  sensitive   = true
+  default     = "&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw"
+}
+
 # ECS Configuration
 variable "instance_type" {
   description = "EC2 instance type for ECS cluster"
