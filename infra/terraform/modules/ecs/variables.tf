@@ -20,6 +20,11 @@ variable "security_group_ids" {
   type        = list(string)
 }
 
+variable "ecs_instance_role_name" {
+  description = "Name of the IAM role for ECS instances (from security module)"
+  type        = string
+}
+
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string

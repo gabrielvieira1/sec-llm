@@ -87,10 +87,11 @@ module "redis" {
 module "ecs" {
   source = "./modules/ecs"
 
-  project_name       = var.project_name
-  vpc_id             = data.aws_vpc.default.id
-  subnet_ids         = data.aws_subnets.default.ids
-  security_group_ids = [module.security.ecs_sg_id]
+  project_name           = var.project_name
+  vpc_id                 = data.aws_vpc.default.id
+  subnet_ids             = data.aws_subnets.default.ids
+  security_group_ids     = [module.security.ecs_sg_id]
+  ecs_instance_role_name = module.security.ecs_instance_role_name
 
   # EC2 Configuration
   instance_type    = var.instance_type

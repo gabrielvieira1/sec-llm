@@ -36,57 +36,10 @@ resource "aws_cloudwatch_log_group" "defectdojo" {
   tags = var.tags
 }
 
-# IAM role for EC2 instances to join ECS cluster
-resource "aws_iam_role" "ecs_instance_role" {
-  name = "${var.project_name}-ecs-instance-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = var.tags
-}
-
-# Attach ECS instance policy
-resource "aws_iam_role_policy_attachment" "ecs_instance_role_policy" {
-  role       = aws_iam_role.ecs_instance_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
-}
-
-# Allow access to SSM parameters
-resource "aws_iam_role_policy" "ecs_ssm_policy" {
-  name = "${var.project_name}-ecs-ssm-policy"
-  role = aws_iam_role.ecs_instance_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:GetParametersByPath"
-        ]
-        Resource = "arn:aws:ssm:*:*:parameter/${var.project_name}/*"
-      }
-    ]
-  })
-}
-
-# Instance profile
+# Instance profile - uses IAM role from security module
 resource "aws_iam_instance_profile" "ecs_instance_profile" {
   name = "${var.project_name}-ecs-instance-profile"
-  role = aws_iam_role.ecs_instance_role.name
+  role = var.ecs_instance_role_name
 
   tags = var.tags
 }
@@ -212,8 +165,9 @@ resource "aws_ecs_task_definition" "defectdojo" {
   # Container definitions baseadas no docker-compose.yml do DefectDojo
   container_definitions = jsonencode([
     {
-      name  = "nginx"
-      image = "${var.nginx_image_uri}:latest"
+      name   = "nginx"
+      image  = "${var.nginx_image_uri}:latest"
+      memory = 256 # 256 MB para nginx
       portMappings = [
         {
           containerPort = 8080
@@ -250,8 +204,9 @@ resource "aws_ecs_task_definition" "defectdojo" {
       ]
     },
     {
-      name  = "django"
-      image = "${var.django_image_uri}:latest"
+      name   = "django"
+      image  = "${var.django_image_uri}:latest"
+      memory = 1024 # 1024 MB para Django
       portMappings = [
         {
           containerPort = 3031
