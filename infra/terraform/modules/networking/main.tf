@@ -87,11 +87,20 @@ resource "aws_security_group" "rds" {
 
   # PostgreSQL access from DefectDojo EC2
   ingress {
-    description     = "PostgreSQL"
+    description     = "PostgreSQL from EC2"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.defectdojo.id]
+  }
+
+  # PostgreSQL access from external (para desenvolvimento local)
+  ingress {
+    description = "PostgreSQL external access"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # ⚠️ Para MVP - em produção, usar IPs específicos
   }
 
   # All outbound traffic

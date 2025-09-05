@@ -1,0 +1,12 @@
+# Informações do RDS criado em Fri Sep  5 02:10:18 -03 2025
+RDS_INSTANCE_ID=defectdojo-postgres-20250905020510
+SECURITY_GROUP_ID=sg-0a6f1ce1a62b0d864
+DB_SUBNET_GROUP=defectdojo-subnet-group-20250905020523
+DATABASE_URL=postgresql://defectdojo:MySecurePassword123!@defectdojo-postgres-20250905020510.cmrkgu8kcrq9.us-east-1.rds.amazonaws.com:5432/defectdojo
+ENDPOINT=defectdojo-postgres-20250905020510.cmrkgu8kcrq9.us-east-1.rds.amazonaws.com
+PORT=5432
+
+# Para deletar os recursos:
+# aws rds delete-db-instance --db-instance-identifier defectdojo-postgres-20250905020510 --skip-final-snapshot --region us-east-1
+# aws rds delete-db-subnet-group --db-subnet-group-name defectdojo-subnet-group-20250905020523 --region us-east-1  
+# aws ec2 delete-security-group --group-id sg-0a6f1ce1a62b0d864 --region us-east-1

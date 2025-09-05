@@ -116,8 +116,12 @@ EOF
 # Add database URL to environment file
 echo "DD_DATABASE_URL=${DB_URL}" >> .env.prod
 
+# Parse DB_URL to get host and port for wait-for-it.sh
+DB_HOST=$(echo "${DB_URL}" | awk -F'[@:]' '{print $4}')
+DB_PORT=$(echo "${DB_URL}" | awk -F'[:/]' '{print $5}')
+
 # Create docker-compose.override.yml for production
-cat > docker-compose.override.yml << 'EOF'
+cat > docker-compose.override.yml << EOF
 version: '3.7'
 services:
   nginx:
@@ -140,6 +144,7 @@ services:
     image: defectdojo/defectdojo-django:latest
     env_file:
       - .env.prod
+    command: ["/wait-for-it.sh", "${DB_HOST}:${DB_PORT}", "-t", "60", "--", "/app/docker/entrypoint-uwsgi.sh"]
     volumes:
       - defectdojo_media:/app/media
     restart: unless-stopped
@@ -155,7 +160,7 @@ services:
       - redis
     env_file:
       - .env.prod
-    command: ["/wait-for-it.sh", "redis:6379", "-t", "30", "--", "/app/docker/entrypoint-celery-beat.sh"]
+    command: ["/wait-for-it.sh", "${DB_HOST}:${DB_PORT}", "-t", "60", "--", "/wait-for-it.sh", "redis:6379", "-t", "30", "--", "/app/docker/entrypoint-celery-beat.sh"]
     volumes:
       - defectdojo_media:/app/media
     restart: unless-stopped
@@ -166,7 +171,7 @@ services:
       - redis
     env_file:
       - .env.prod
-    command: ["/wait-for-it.sh", "redis:6379", "-t", "30", "--", "/app/docker/entrypoint-celery-worker.sh"]
+    command: ["/wait-for-it.sh", "${DB_HOST}:${DB_PORT}", "-t", "60", "--", "/wait-for-it.sh", "redis:6379", "-t", "30", "--", "/app/docker/entrypoint-celery-worker.sh"]
     volumes:
       - defectdojo_media:/app/media
     restart: unless-stopped
@@ -175,7 +180,7 @@ services:
     image: defectdojo/defectdojo-django:latest
     env_file:
       - .env.prod
-    command: ["/wait-for-it.sh", "redis:6379", "-t", "30", "--", "/app/docker/entrypoint-initializer.sh"]
+    command: ["/wait-for-it.sh", "${DB_HOST}:${DB_PORT}", "-t", "60", "--", "/wait-for-it.sh", "redis:6379", "-t", "30", "--", "/app/docker/entrypoint-initializer.sh"]
     volumes:
       - defectdojo_media:/app/media
 
@@ -209,7 +214,7 @@ After=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/defectdojo
-ExecStart=/usr/local/bin/docker-compose up -d
+ExecStart=/usr/local/bin/docker-compose up -d nginx uwsgi celerybeat celeryworker initializer redis
 ExecStop=/usr/local/bin/docker-compose down
 User=root
 Group=root
@@ -229,7 +234,7 @@ echo "Pulling DefectDojo images..."
 docker-compose pull
 
 echo "Starting DefectDojo..."
-docker-compose up -d
+docker-compose up -d nginx uwsgi celerybeat celeryworker initializer redis
 
 # Wait for services to be ready
 echo "Waiting for DefectDojo to be ready..."

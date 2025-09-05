@@ -36,7 +36,7 @@ resource "aws_instance" "defectdojo" {
   vpc_security_group_ids = var.security_group_ids
   iam_instance_profile   = var.iam_instance_profile_name
 
-  user_data = base64encode(replace(
+  user_data_base64 = base64encode(replace(
     file("${path.module}/user_data.sh"),
     "PROJECT_NAME_PLACEHOLDER",
     var.project_name

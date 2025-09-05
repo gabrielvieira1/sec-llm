@@ -33,7 +33,7 @@ resource "aws_db_instance" "main" {
   # Network Configuration
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = var.security_group_ids
-  publicly_accessible    = false
+  publicly_accessible    = true # HABILITADO para acesso externo
 
   # Backup Configuration (DISABLED for MVP)
   backup_retention_period = 0    # No backups for MVP

@@ -1,0 +1,120 @@
+# docker-compose para DefectDojo com RDS AWS
+# Execute com: docker-compose -f docker-compose.rds.yml up -d
+
+services:
+  nginx:
+    build:
+      context: ./
+      dockerfile: "Dockerfile.nginx-alpine"
+    image: "defectdojo/defectdojo-nginx:latest"
+    depends_on:
+      uwsgi:
+        condition: service_started
+    environment:
+      NGINX_METRICS_ENABLED: "false"
+      DD_UWSGI_HOST: "uwsgi"
+      DD_UWSGI_PORT: "3031"
+    volumes:
+      - defectdojo_media:/usr/share/nginx/html/media
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+
+  uwsgi:
+    build:
+      context: ./
+      dockerfile: "Dockerfile.django-debian"
+      target: django
+    image: "defectdojo/defectdojo-django:latest"
+    depends_on:
+      initializer:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    entrypoint: ["/entrypoint-uwsgi.sh"]
+    env_file:
+      - .env.local
+    environment:
+      DD_DEBUG: "True"
+      DD_DJANGO_METRICS_ENABLED: "False"
+      DD_ALLOWED_HOSTS: "*"
+      DD_DATABASE_URL: postgresql://defectdojo:MySecurePassword123!@defectdojo-postgres-20250905020510.cmrkgu8kcrq9.us-east-1.rds.amazonaws.com:5432/defectdojo
+      DD_CELERY_BROKER_URL: redis://redis:6379/0
+      DD_SECRET_KEY: "hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq"
+      DD_CREDENTIAL_AES_256_KEY: "&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw"
+    volumes:
+      - type: bind
+        source: ./docker/extra_settings
+        target: /app/docker/extra_settings
+      - "defectdojo_media:/app/media"
+
+  celerybeat:
+    image: "defectdojo/defectdojo-django:latest"
+    depends_on:
+      initializer:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    entrypoint: ["/entrypoint-celery-beat.sh"]
+    env_file:
+      - .env.local
+    environment:
+      DD_DATABASE_URL: postgresql://defectdojo:MySecurePassword123!@defectdojo-postgres-20250905020510.cmrkgu8kcrq9.us-east-1.rds.amazonaws.com:5432/defectdojo
+      DD_CELERY_BROKER_URL: redis://redis:6379/0
+      DD_SECRET_KEY: "hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq"
+      DD_CREDENTIAL_AES_256_KEY: "&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw"
+    volumes:
+      - type: bind
+        source: ./docker/extra_settings
+        target: /app/docker/extra_settings
+
+  celeryworker:
+    image: "defectdojo/defectdojo-django:latest"
+    depends_on:
+      initializer:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    entrypoint: ["/entrypoint-celery-worker.sh"]
+    env_file:
+      - .env.local
+    environment:
+      DD_DATABASE_URL: postgresql://defectdojo:MySecurePassword123!@defectdojo-postgres-20250905020510.cmrkgu8kcrq9.us-east-1.rds.amazonaws.com:5432/defectdojo
+      DD_CELERY_BROKER_URL: redis://redis:6379/0
+      DD_SECRET_KEY: "hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq"
+      DD_CREDENTIAL_AES_256_KEY: "&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw"
+    volumes:
+      - type: bind
+        source: ./docker/extra_settings
+        target: /app/docker/extra_settings
+      - "defectdojo_media:/app/media"
+
+  initializer:
+    image: "defectdojo/defectdojo-django:latest"
+    entrypoint: ["/entrypoint-initializer.sh"]
+    env_file:
+      - .env.local
+    environment:
+      DD_DATABASE_URL: postgresql://defectdojo:MySecurePassword123!@defectdojo-postgres-20250905020510.cmrkgu8kcrq9.us-east-1.rds.amazonaws.com:5432/defectdojo
+      DD_ADMIN_USER: "admin"
+      DD_ADMIN_MAIL: "admin@defectdojo.local"
+      DD_ADMIN_PASSWORD: "DefectDojoMVP2024!"
+      DD_ADMIN_FIRST_NAME: "Admin"
+      DD_ADMIN_LAST_NAME: "User"
+      DD_INITIALIZE: "true"
+      DD_ENABLE_AUDITLOG: "False"
+      DD_SECRET_KEY: "hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq"
+      DD_CREDENTIAL_AES_256_KEY: "&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw"
+    volumes:
+      - type: bind
+        source: ./docker/extra_settings
+        target: /app/docker/extra_settings
+
+  redis:
+    image: redis:7.2.10-alpine@sha256:395ccd7ee4db0867de0d0410f4712a9e0331cff9fdbd864f71ec0f7982d3ffe6
+    volumes:
+      - defectdojo_redis:/data
+
+volumes:
+  defectdojo_media: {}
+  defectdojo_redis: {}
