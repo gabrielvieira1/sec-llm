@@ -25,7 +25,7 @@ permissions:
 
 env:
   AWS_REGION: "us-east-1"
-  TF_VAR_project_name: "defectdojo-mvp"
+  TF_VAR_project_name: "sec-llm-infra-defectdojo"
 
 jobs:
   terraform:
@@ -148,10 +148,42 @@ jobs:
         id: output
         if: inputs.action == 'apply' && steps.apply.outcome == 'success'
         run: |
-          echo "## Terraform Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 DefectDojo Infrastructure Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Terraform Outputs:" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           terraform output >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get instance information for DefectDojo access
+          INSTANCE_IP=$(terraform output -raw instance_public_ip 2>/dev/null || echo "")
+          INSTANCE_ID=$(terraform output -raw instance_id 2>/dev/null || echo "")
+
+          if [ -n "$INSTANCE_IP" ]; then
+            echo "### 🎯 DefectDojo Access Information:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**URLs:**" >> $GITHUB_STEP_SUMMARY
+            echo "- DefectDojo: http://$INSTANCE_IP:8080/" >> $GITHUB_STEP_SUMMARY
+            echo "- Alternative: http://$INSTANCE_IP/" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Default Login:**" >> $GITHUB_STEP_SUMMARY
+            echo "- Username: \`admin\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Password: \`DefectDojoMVP2024!\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**SSH Access:**" >> $GITHUB_STEP_SUMMARY
+            echo "\`ssh -i ~/.ssh/sec-llm-infra-defectdojo-key.pem ubuntu@$INSTANCE_IP\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ⏱️ Installation Status:" >> $GITHUB_STEP_SUMMARY
+            echo "DefectDojo installation takes 5-10 minutes after infrastructure deployment." >> $GITHUB_STEP_SUMMARY
+            echo "Monitor installation progress:" >> $GITHUB_STEP_SUMMARY
+            echo "\`ssh ubuntu@$INSTANCE_IP 'tail -f /var/log/defectdojo-install.log'\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔍 Troubleshooting:" >> $GITHUB_STEP_SUMMARY
+            echo "- Check containers: \`ssh ubuntu@$INSTANCE_IP 'cd /opt/defectdojo && docker-compose ps'\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Check logs: \`ssh ubuntu@$INSTANCE_IP 'cd /opt/defectdojo && docker-compose logs'\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Restart DefectDojo: \`ssh ubuntu@$INSTANCE_IP 'cd /opt/defectdojo && sudo docker-compose restart'\`" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: "Upload Terraform Plan Artifact"
         uses: actions/upload-artifact@v4

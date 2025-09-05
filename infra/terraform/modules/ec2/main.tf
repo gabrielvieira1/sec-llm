@@ -1,23 +1,7 @@
-# EC2 Module for DefectDojo
-# This module creates EC2 instances optimized for DefectDojo deployment
+# EC2 Module for DefectDojo - Simplified Single Instance
+# This module creates a single EC2 instance with DefectDojo installed via Docker
 
-# Data source to get the latest Amazon Linux 2023 AMI (recommended for AWS)
-data "aws_ami" "amazon_linux" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["al2023-ami-*-x86_64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
-# Alternative Ubuntu 24.04 LTS AMI (if preferred)
+# Data source to get the latest Ubuntu 24.04 LTS AMI
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
@@ -33,70 +17,31 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-# Data source to get default VPC subnets
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [var.vpc_id]
-  }
-
-  filter {
-    name   = "default-for-az"
-    values = ["true"]
-  }
-}
-
-# Key pair for SSH access (using existing key in AWS)
-# Create this key pair manually in AWS Console or via CLI:
-# aws ec2 create-key-pair --key-name sec-llm-infra-defectdojo-key --query 'KeyMaterial' --output text > ~/.ssh/sec-llm-infra-defectdojo-key.pem
-# chmod 400 ~/.ssh/sec-llm-infra-defectdojo-key.pem
+# Key pair for SSH access (using existing key)
 data "aws_key_pair" "defectdojo_key" {
-  key_name = "${var.project_name}-defectdojo-key"
-}
-
-# Launch template for DefectDojo instances
-resource "aws_launch_template" "defectdojo" {
-  name_prefix   = "${var.project_name}-defectdojo-"
-  image_id      = data.aws_ami.amazon_linux.id # Using Amazon Linux 2023
-  instance_type = var.instance_type
-  key_name      = data.aws_key_pair.defectdojo_key.key_name
-
-  vpc_security_group_ids = var.security_group_ids
-
-  iam_instance_profile {
-    name = var.iam_instance_profile_name # From security module
-  }
-
-  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
-    project_name = var.project_name
-  }))
-
-  tag_specifications {
-    resource_type = "instance"
-    tags = merge(var.tags, {
-      Name = "${var.project_name}-defectdojo"
-      Type = "DefectDojo Server"
-    })
-  }
-
-  tag_specifications {
-    resource_type = "volume"
-    tags = merge(var.tags, {
-      Name = "${var.project_name}-defectdojo-volume"
-    })
-  }
-
-  tags = var.tags
+  key_name = "sec-llm-infra-defectdojo-key"
 }
 
 # Single EC2 instance for DefectDojo
 resource "aws_instance" "defectdojo" {
-  launch_template {
-    id      = aws_launch_template.defectdojo.id
-    version = "$Latest"
-  }
+  ami           = data.aws_ami.ubuntu.id
+  instance_type = var.instance_type
+  key_name      = data.aws_key_pair.defectdojo_key.key_name
 
-  subnet_id = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = var.security_group_ids
+  iam_instance_profile   = var.iam_instance_profile_name
+
+  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
+    project_name = var.project_name
+    database_url = var.database_url
+  }))
+
+  root_block_device {
+    volume_type           = "gp3"
+    volume_size           = 20
+    delete_on_termination = true
+    encrypted             = true
+  }
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-defectdojo"
@@ -106,12 +51,16 @@ resource "aws_instance" "defectdojo" {
 
 # S3 bucket for DefectDojo file uploads
 resource "aws_s3_bucket" "defectdojo_uploads" {
-  bucket = "${var.project_name}-defectdojo-uploads"
+  bucket = "${var.project_name}-defectdojo-uploads-${random_id.bucket_suffix.hex}"
 
   tags = merge(var.tags, {
-    Name    = "${var.project_name}-defectdojo-uploads"
     Purpose = "DefectDojo file uploads"
   })
+}
+
+# Random suffix for S3 bucket name uniqueness
+resource "random_id" "bucket_suffix" {
+  byte_length = 4
 }
 
 resource "aws_s3_bucket_versioning" "defectdojo_uploads" {
@@ -121,14 +70,12 @@ resource "aws_s3_bucket_versioning" "defectdojo_uploads" {
   }
 }
 
-resource "aws_s3_bucket_encryption" "defectdojo_uploads" {
+resource "aws_s3_bucket_server_side_encryption_configuration" "defectdojo_uploads" {
   bucket = aws_s3_bucket.defectdojo_uploads.id
 
-  server_side_encryption_configuration {
-    rule {
-      apply_server_side_encryption_by_default {
-        sse_algorithm = "AES256"
-      }
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
     }
   }
 }

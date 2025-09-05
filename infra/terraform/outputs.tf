@@ -1,91 +1,70 @@
-# DefectDojo MVP Outputs - Phase 1: Security + ECR + Redis (optional)
+# DefectDojo MVP Outputs - Simplified EC2 Architecture
 
-# ECR Repository URLs
-output "django_repository_url" {
-  description = "ECR repository URL for Django image"
-  value       = module.ecr.django_repository_url
+# EC2 Instance Information
+output "instance_id" {
+  description = "EC2 instance ID"
+  value       = module.ec2.instance_id
 }
 
-output "nginx_repository_url" {
-  description = "ECR repository URL for Nginx image"
-  value       = module.ecr.nginx_repository_url
+output "instance_public_ip" {
+  description = "Public IP address of the DefectDojo instance"
+  value       = module.ec2.instance_public_ip
 }
 
-output "ecr_repositories" {
-  description = "ECR repository URLs"
-  value = {
-    django = module.ecr.django_repository_url
-    nginx  = module.ecr.nginx_repository_url
-  }
+output "instance_public_dns" {
+  description = "Public DNS name of the DefectDojo instance"
+  value       = module.ec2.instance_public_dns
+}
+
+output "ssh_connection_command" {
+  description = "SSH command to connect to the instance"
+  value       = module.ec2.ssh_connection_command
+}
+
+# RDS Information
+output "database_endpoint" {
+  description = "RDS PostgreSQL endpoint"
+  value       = module.rds.endpoint
+}
+
+output "database_port" {
+  description = "RDS PostgreSQL port"
+  value       = module.rds.port
+}
+
+# S3 Information
+output "s3_bucket_name" {
+  description = "S3 bucket name for DefectDojo uploads"
+  value       = module.ec2.s3_bucket_name
 }
 
 # Security Groups
 output "security_groups" {
   description = "Created security group IDs"
   value = {
-    ecs_sg_id = module.security.ecs_sg_id
-    rds_sg_id = module.security.rds_sg_id
+    defectdojo_sg_id = module.networking.defectdojo_security_group_id
+    rds_sg_id        = module.networking.rds_security_group_id
   }
 }
 
-# IAM Roles
-output "iam_roles" {
-  description = "Created IAM role ARNs"
+# Application URLs
+output "application_urls" {
+  description = "DefectDojo application URLs"
   value = {
-    ecs_execution_role = module.security.ecs_execution_role_arn
-    ecs_task_role      = module.security.ecs_task_role_arn
+    http  = "http://${module.ec2.instance_public_ip}"
+    https = "https://${module.ec2.instance_public_ip}"
+    app   = "http://${module.ec2.instance_public_ip}:8080"
   }
 }
 
-# Redis Cache (Phase 1 - optional)
-output "redis_endpoint" {
-  description = "ElastiCache Redis endpoint"
-  value       = var.enable_redis ? module.redis[0].endpoint : "Redis not enabled for MVP"
-  sensitive   = false
+# Next Steps
+output "next_steps" {
+  description = "Next steps to access DefectDojo"
+  value       = <<-EOT
+    1. Wait 5-10 minutes for DefectDojo to be fully installed
+    2. Access DefectDojo at: http://${module.ec2.instance_public_ip}:8080
+    3. SSH to instance: ${module.ec2.ssh_connection_command}
+    4. Check logs: ssh ubuntu@${module.ec2.instance_public_ip} 'tail -f /var/log/defectdojo-install.log'
+    5. Default login will be created during first boot
+  EOT
 }
-
-output "redis_url" {
-  description = "Complete Redis URL for DefectDojo"
-  value       = var.enable_redis ? module.redis[0].redis_url : "Redis not enabled for MVP"
-  sensitive   = false
-}
-
-# RDS Database (Phase 2 - enabled)
-output "rds_endpoint" {
-  description = "RDS PostgreSQL endpoint"
-  value       = module.rds.endpoint
-  sensitive   = true
-}
-
-output "database_url" {
-  description = "Complete database URL for DefectDojo"
-  value       = module.rds.database_url
-  sensitive   = true
-}
-
-# Phase Status Updated for Final Phase
-output "phase3_status" {
-  description = "Phase 3 deployment status"
-  value = {
-    phase        = "Phase 3: Complete MVP - Security + ECR + RDS + ECS"
-    status       = "Complete"
-    next_step    = "Build and deploy DefectDojo application using app-deploy workflow"
-    ecr_ready    = "Ready for Docker image builds"
-    rds_ready    = "PostgreSQL database ready"
-    ecs_ready    = "EC2 Spot instances and ECS service ready"
-    redis_status = var.enable_redis ? "Enabled" : "Disabled (using default for MVP)"
-  }
-}
-
-# ECS Cluster Information (Phase 3 - enabled)
-output "ecs_cluster_name" {
-  description = "ECS cluster name"
-  value       = module.ecs.cluster_name
-}
-
-output "ecs_service_name" {
-  description = "ECS service name"
-  value       = module.ecs.service_name
-}
-
-# All phases complete - no commented outputs needed

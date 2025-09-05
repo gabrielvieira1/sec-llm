@@ -137,7 +137,6 @@ jobs:
           echo "🔄 Updating ECS service..."
           aws ecs update-service \
             --cluster ${{ env.PROJECT_NAME }}-cluster \
-            --cluster ${{ env.PROJECT_NAME }}-cluster \
             --service ${{ env.PROJECT_NAME }}-service \
             --task-definition $NEW_TASK_DEF_ARN \
             --force-new-deployment
