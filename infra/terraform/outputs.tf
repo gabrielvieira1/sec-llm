@@ -1,4 +1,4 @@
-# DefectDojo MVP Outputs - Simplified EC2 Architecture
+# DefectDojo MVP Outputs - Simplified Architecture
 
 # EC2 Instance Information
 output "instance_id" {
@@ -6,7 +6,7 @@ output "instance_id" {
   value       = module.ec2.instance_id
 }
 
-output "instance_public_ip" {
+output "ec2_public_ip" {
   description = "Public IP address of the DefectDojo instance"
   value       = module.ec2.instance_public_ip
 }
@@ -22,8 +22,13 @@ output "ssh_connection_command" {
 }
 
 # RDS Information
-output "database_endpoint" {
+output "rds_endpoint" {
   description = "RDS PostgreSQL endpoint"
+  value       = module.rds.endpoint
+}
+
+output "database_endpoint" {
+  description = "RDS PostgreSQL endpoint (alias)"
   value       = module.rds.endpoint
 }
 
@@ -32,18 +37,12 @@ output "database_port" {
   value       = module.rds.port
 }
 
-# S3 Information
-output "s3_bucket_name" {
-  description = "S3 bucket name for DefectDojo uploads"
-  value       = module.ec2.s3_bucket_name
-}
-
 # Security Groups
 output "security_groups" {
   description = "Created security group IDs"
   value = {
-    defectdojo_sg_id = module.networking.defectdojo_security_group_id
-    rds_sg_id        = module.networking.rds_security_group_id
+    defectdojo_sg_id = aws_security_group.defectdojo.id
+    rds_sg_id        = aws_security_group.rds.id
   }
 }
 
@@ -65,6 +64,6 @@ output "next_steps" {
     2. Access DefectDojo at: http://${module.ec2.instance_public_ip}:8080
     3. SSH to instance: ${module.ec2.ssh_connection_command}
     4. Check logs: ssh ubuntu@${module.ec2.instance_public_ip} 'tail -f /var/log/defectdojo-install.log'
-    5. Default login will be created during first boot
+    5. Default login: admin / DefectDojoMVP2024!
   EOT
 }

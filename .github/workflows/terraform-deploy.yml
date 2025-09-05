@@ -19,13 +19,40 @@ on:
         default: false
         type: boolean
 
+  workflow_call:
+    inputs:
+      action:
+        description: "Terraform action to perform"
+        required: true
+        type: string
+      auto_approve:
+        description: "Auto approve (skip manual approval for apply/destroy)"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+      DB_PASSWORD:
+        required: true
+    outputs:
+      ec2_instance_id:
+        description: "EC2 Instance ID"
+        value: ${{ jobs.terraform.outputs.ec2_instance_id }}
+      ec2_public_ip:
+        description: "EC2 Public IP"
+        value: ${{ jobs.terraform.outputs.ec2_public_ip }}
+      rds_endpoint:
+        description: "RDS Endpoint"
+        value: ${{ jobs.terraform.outputs.rds_endpoint }}
+
 permissions:
   id-token: write # Required for AWS OIDC
-  contents: read # Required for checkout
+  contents: read
 
 env:
   AWS_REGION: "us-east-1"
-  TF_VAR_project_name: "sec-llm-infra-defectdojo"
+  TF_VAR_project_name: "sec-llm-infra"
 
 jobs:
   terraform:
@@ -39,6 +66,9 @@ jobs:
 
     outputs:
       terraform_outputs: ${{ steps.terraform_outputs.outputs.terraform_outputs }}
+      ec2_instance_id: ${{ steps.terraform_outputs.outputs.ec2_instance_id }}
+      ec2_public_ip: ${{ steps.terraform_outputs.outputs.ec2_public_ip }}
+      rds_endpoint: ${{ steps.terraform_outputs.outputs.rds_endpoint }}
 
     steps:
       - name: "Checkout Repository"
@@ -50,9 +80,8 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          role-session-name: GitHubInfraRole-TerraformDeploy
+          role-session-name: GitHubInfraDeploy-Terraform
           aws-region: ${{ env.AWS_REGION }}
-          mask-aws-account-id: false
 
       - name: "Setup Terraform"
         uses: hashicorp/setup-terraform@v3
@@ -67,11 +96,7 @@ jobs:
       - name: "Terraform Init"
         id: init
         run: |
-          terraform init \
-            -backend-config="bucket=sec-llm-infra-terraform-state" \
-            -backend-config="key=terraform.tfstate" \
-            -backend-config="region=us-east-1" \
-            -backend-config="encrypt=true"
+          terraform init
 
       - name: "Terraform Validate"
         id: validate
@@ -80,17 +105,26 @@ jobs:
       - name: "Terraform Plan"
         id: plan
         run: |
+          echo "🔍 Creating Terraform execution plan..."
+
           if [ "${{ inputs.action }}" == "destroy" ]; then
+            echo "⚠️ Planning DESTROY operation..."
             terraform plan -destroy -no-color -input=false \
               -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="project_name=${{ env.TF_VAR_project_name }}" \
               -var="db_password=${{ secrets.DB_PASSWORD }}" \
               -out=tfplan
           else
+            echo "📋 Planning infrastructure deployment..."
             terraform plan -no-color -input=false \
               -var="aws_region=${{ env.AWS_REGION }}" \
+              -var="project_name=${{ env.TF_VAR_project_name }}" \
               -var="db_password=${{ secrets.DB_PASSWORD }}" \
               -out=tfplan
           fi
+
+          # Show plan summary
+          echo "📊 Plan created successfully and saved to tfplan"
         continue-on-error: false
 
       - name: "Manual Approval for Apply/Destroy"
@@ -124,7 +158,17 @@ jobs:
           inputs.action == 'apply' && 
           steps.plan.outcome == 'success'
         run: |
+          echo "🚀 Applying Terraform infrastructure changes..."
+          echo "This will create/update AWS resources:"
+          echo "  - EC2 Instance (DefectDojo server)"
+          echo "  - RDS PostgreSQL Database"
+          echo "  - Security Groups (EC2 + RDS)"
+          echo "  - IAM Roles and Policies"
+          echo ""
+
           terraform apply -auto-approve -input=false tfplan
+
+          echo "✅ Infrastructure deployment completed successfully!"
         continue-on-error: false
 
       - name: "Terraform Destroy"
@@ -140,9 +184,62 @@ jobs:
         id: terraform_outputs
         if: inputs.action == 'apply' && steps.apply.outcome == 'success'
         run: |
-          # Export all terraform outputs as JSON for other workflows
+          echo "📋 Collecting Terraform outputs for downstream workflows..."
+
+          # Export all terraform outputs as JSON
           terraform output -json > terraform_outputs.json
           echo "terraform_outputs=$(cat terraform_outputs.json | jq -c .)" >> $GITHUB_OUTPUT
+
+          # Export specific outputs for the app-deploy workflow
+          EC2_INSTANCE_ID=$(terraform output -raw instance_id)
+          EC2_PUBLIC_IP=$(terraform output -raw ec2_public_ip)
+          RDS_ENDPOINT=$(terraform output -raw rds_endpoint)
+
+          echo "ec2_instance_id=$EC2_INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "ec2_public_ip=$EC2_PUBLIC_IP" >> $GITHUB_OUTPUT
+          echo "rds_endpoint=$RDS_ENDPOINT" >> $GITHUB_OUTPUT
+
+          echo "✅ Outputs exported successfully:"
+          echo "  - EC2 Instance: $EC2_INSTANCE_ID"
+          echo "  - Public IP: $EC2_PUBLIC_IP"
+          echo "  - RDS Endpoint: $RDS_ENDPOINT"
+
+      - name: "Infrastructure Health Check"
+        id: health_check
+        if: inputs.action == 'apply' && steps.apply.outcome == 'success'
+        run: |
+          echo "🏥 Performing infrastructure health checks..."
+
+          EC2_INSTANCE_ID=$(terraform output -raw instance_id)
+          RDS_ENDPOINT=$(terraform output -raw rds_endpoint)
+
+          # Check EC2 instance status
+          echo "Checking EC2 instance status..."
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text)
+
+          echo "EC2 Instance State: $INSTANCE_STATE"
+
+          # Check RDS status
+          echo "Checking RDS instance status..."
+          DB_IDENTIFIER=$(echo "$RDS_ENDPOINT" | cut -d'.' -f1)
+          RDS_STATUS=$(aws rds describe-db-instances \
+            --db-instance-identifier "$DB_IDENTIFIER" \
+            --query 'DBInstances[0].DBInstanceStatus' \
+            --output text 2>/dev/null || echo "unknown")
+
+          echo "RDS Instance Status: $RDS_STATUS"
+
+          # Summary
+          if [ "$INSTANCE_STATE" = "running" ] && [ "$RDS_STATUS" = "available" ]; then
+            echo "✅ Infrastructure health check passed!"
+            echo "infrastructure_ready=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Infrastructure not fully ready yet"
+            echo "infrastructure_ready=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: "Terraform Output"
         id: output

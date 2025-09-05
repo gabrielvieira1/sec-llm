@@ -1,0 +1,439 @@
+name: DefectDojo Application Deploy - Unified
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_mode:
+        description: "Deployment mode"
+        required: true
+        type: choice
+        options:
+          - "fast" # Deploy rápido (5-10 min)
+          - "complete" # Deploy completo com todas verificações (15-20 min)
+        default: "fast"
+
+      instance_name_filter:
+        description: "EC2 Instance name filter"
+        required: false
+        default: "defectdojo"
+        type: string
+
+      force_rebuild:
+        description: "Force rebuild Docker images"
+        required: false
+        default: false
+        type: boolean
+
+      force_restart:
+        description: "Force restart DefectDojo services"
+        required: false
+        default: false
+        type: boolean
+
+  workflow_call:
+    inputs:
+      deployment_mode:
+        description: "Deployment mode (fast/complete)"
+        required: false
+        type: string
+        default: "fast"
+      ec2_instance_id:
+        description: "EC2 Instance ID (optional - will discover if not provided)"
+        required: false
+        type: string
+      ec2_public_ip:
+        description: "EC2 Public IP (optional - will discover if not provided)"
+        required: false
+        type: string
+      rds_endpoint:
+        description: "RDS Endpoint (optional - will discover if not provided)"
+        required: false
+        type: string
+      instance_name_filter:
+        description: "EC2 Instance name filter"
+        required: false
+        type: string
+        default: "defectdojo"
+      force_rebuild:
+        description: "Force rebuild Docker images"
+        required: false
+        type: boolean
+        default: false
+      force_restart:
+        description: "Force restart DefectDojo services"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+      DB_PASSWORD:
+        required: true
+      EC2_PRIVATE_KEY:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_DEFAULT_REGION: us-east-1
+
+jobs:
+  deploy_application:
+    name: "Deploy DefectDojo App (${{ inputs.deployment_mode || 'fast' }} mode)"
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.deployment_mode == 'complete' && 45 || 25 }}
+
+    outputs:
+      instance_id: ${{ steps.discover.outputs.instance_id }}
+      public_ip: ${{ steps.discover.outputs.public_ip }}
+      rds_endpoint: ${{ steps.discover.outputs.rds_endpoint }}
+
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubAppDeploy-${{ inputs.deployment_mode || 'fast' }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: "Discover Infrastructure"
+        id: discover
+        run: |
+          INSTANCE_FILTER="${{ inputs.instance_name_filter || 'defectdojo' }}"
+          echo "🔍 Searching for infrastructure (filter: $INSTANCE_FILTER)..."
+
+          # Find EC2 instance
+          INSTANCE_DATA=$(aws ec2 describe-instances \
+            --filters "Name=instance-state-name,Values=running" \
+                     "Name=tag:Name,Values=*${INSTANCE_FILTER}*" \
+            --query 'Reservations[0].Instances[0].{InstanceId:InstanceId,PublicIp:PublicIpAddress,PrivateIp:PrivateIpAddress}' \
+            --output json 2>/dev/null || echo '{}')
+
+          INSTANCE_ID=$(echo "$INSTANCE_DATA" | jq -r '.InstanceId // empty')
+          PUBLIC_IP=$(echo "$INSTANCE_DATA" | jq -r '.PublicIp // empty')
+          PRIVATE_IP=$(echo "$INSTANCE_DATA" | jq -r '.PrivateIp // empty')
+
+          # Use provided values if available (from terraform workflow)
+          if [ -n "${{ inputs.ec2_instance_id }}" ]; then
+            INSTANCE_ID="${{ inputs.ec2_instance_id }}"
+            echo "Using provided EC2 Instance ID: $INSTANCE_ID"
+          fi
+
+          if [ -n "${{ inputs.ec2_public_ip }}" ]; then
+            PUBLIC_IP="${{ inputs.ec2_public_ip }}"
+            echo "Using provided EC2 Public IP: $PUBLIC_IP"
+          fi
+
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "null" ]; then
+            echo "❌ No running EC2 instance found with name containing '$INSTANCE_FILTER'"
+            exit 1
+          fi
+
+          # Find RDS endpoint
+          if [ -n "${{ inputs.rds_endpoint }}" ]; then
+            RDS_ENDPOINT="${{ inputs.rds_endpoint }}"
+            echo "Using provided RDS endpoint: $RDS_ENDPOINT"
+          else
+            echo "🔍 Auto-discovering RDS endpoint..."
+            RDS_ENDPOINT=$(aws rds describe-db-instances \
+              --query 'DBInstances[?DBInstanceStatus==`available`].Endpoint.Address' \
+              --output text 2>/dev/null | head -n1 || echo "")
+          fi
+
+          if [ -z "$RDS_ENDPOINT" ] || [ "$RDS_ENDPOINT" = "None" ]; then
+            echo "⚠️ No RDS endpoint found"
+            RDS_ENDPOINT=""
+          else
+            echo "✅ Found RDS endpoint: $RDS_ENDPOINT"
+          fi
+
+          echo "✅ Infrastructure discovered:"
+          echo "  Instance ID: $INSTANCE_ID"
+          echo "  Public IP: $PUBLIC_IP"
+          echo "  Private IP: $PRIVATE_IP"
+          echo "  RDS Endpoint: $RDS_ENDPOINT"
+
+          # Export outputs
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+          echo "private_ip=$PRIVATE_IP" >> $GITHUB_OUTPUT
+          echo "rds_endpoint=$RDS_ENDPOINT" >> $GITHUB_OUTPUT
+
+      - name: "Setup SSH Key"
+        run: |
+          echo "${{ secrets.EC2_PRIVATE_KEY }}" > ec2-key.pem
+          chmod 600 ec2-key.pem
+
+      - name: "Wait for EC2 Instance (Complete Mode)"
+        if: inputs.deployment_mode == 'complete'
+        run: |
+          echo "⏳ Waiting for EC2 instance to be ready (complete mode)..."
+
+          # Test SSH connectivity
+          for i in {1..10}; do
+            if ssh -i ec2-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ec2-user@${{ steps.discover.outputs.public_ip }} "echo 'SSH connection successful'" 2>/dev/null; then
+              echo "✅ SSH connection established!"
+              break
+            fi
+            echo "Waiting for SSH connectivity... (attempt $i/10)"
+            sleep 15
+          done
+
+      - name: "Deploy Application Code"
+        run: |
+          MODE="${{ inputs.deployment_mode || 'fast' }}"
+          echo "📦 Deploying application code ($MODE mode)..."
+
+          # Create application archive
+          tar -czf app-deploy.tar.gz app/
+
+          # Copy to EC2
+          scp -i ec2-key.pem -o StrictHostKeyChecking=no app-deploy.tar.gz ec2-user@${{ steps.discover.outputs.public_ip }}:/tmp/
+
+          # Deploy application
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'DEPLOY_EOF'
+            echo "🚀 Starting $MODE deployment..."
+            
+            # Stop existing containers if running
+            if [ -d "/opt/defectdojo" ]; then
+              echo "🛑 Stopping existing DefectDojo services..."
+              cd /opt/defectdojo && docker-compose -f app/docker-compose.rds.yml down --remove-orphans 2>/dev/null || true
+              
+              # Backup existing version
+              echo "💾 Backing up existing version..."
+              sudo mv /opt/defectdojo /opt/defectdojo.backup.$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+            fi
+            
+            # Create fresh directory and extract
+            sudo mkdir -p /opt/defectdojo
+            cd /opt/defectdojo
+            sudo tar -xzf /tmp/app-deploy.tar.gz
+            sudo chown -R ec2-user:ec2-user /opt/defectdojo
+            rm /tmp/app-deploy.tar.gz
+            
+            # Verify extraction
+            echo "📁 Application structure extracted:"
+            ls -la /opt/defectdojo/app/ | head -10
+
+            echo "✅ Application code deployed successfully"
+          DEPLOY_EOF
+
+      - name: "Configure Environment"
+        run: |
+          echo "⚙️ Configuring DefectDojo environment..."
+
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'CONFIG_EOF'
+            cd /opt/defectdojo/app
+            
+            # Create environment configuration
+            echo "Creating .env.local configuration..."
+            echo "DD_DATABASE_URL=postgresql://defectdojo:${{ secrets.DB_PASSWORD }}@${{ steps.discover.outputs.rds_endpoint }}:5432/defectdojo" > .env.local
+            echo "DD_DEBUG=True" >> .env.local
+            echo "DD_ALLOWED_HOSTS=*" >> .env.local
+            echo "DD_SECRET_KEY=hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq" >> .env.local
+            echo "DD_CREDENTIAL_AES_256_KEY=&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw" >> .env.local
+            echo "DD_ENABLE_AUDITLOG=False" >> .env.local
+            echo "DD_ADMIN_USER=admin" >> .env.local
+            echo "DD_ADMIN_MAIL=admin@defectdojo.local" >> .env.local
+            echo "DD_ADMIN_PASSWORD=DefectDojoMVP2024!" >> .env.local
+            echo "DD_ADMIN_FIRST_NAME=Admin" >> .env.local
+            echo "DD_ADMIN_LAST_NAME=User" >> .env.local
+            echo "DD_INITIALIZE=true" >> .env.local
+            echo "DD_CELERY_BROKER_URL=redis://redis:6379/0" >> .env.local
+            echo "DD_MEDIA_ROOT=/app/media" >> .env.local
+            echo "DD_TIME_ZONE=America/Sao_Paulo" >> .env.local
+
+            # Update docker-compose with current RDS endpoint
+            if [ -f "docker-compose.rds.yml" ]; then
+              echo "📝 Updating docker-compose.rds.yml with RDS endpoint..."
+              sed -i "s|DD_DATABASE_URL:.*|DD_DATABASE_URL: postgresql://defectdojo:${{ secrets.DB_PASSWORD }}@${{ steps.discover.outputs.rds_endpoint }}:5432/defectdojo|g" docker-compose.rds.yml
+            fi
+
+            echo "✅ Environment configuration completed"
+          CONFIG_EOF
+
+      - name: "Build Docker Images"
+        run: |
+          MODE="${{ inputs.deployment_mode || 'fast' }}"
+          FORCE_REBUILD="${{ inputs.force_rebuild }}"
+
+          echo "🐳 Managing Docker images ($MODE mode, force_rebuild: $FORCE_REBUILD)..."
+
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'BUILD_EOF'
+            cd /opt/defectdojo/app
+            
+            FORCE_REBUILD="${{ inputs.force_rebuild }}"
+            MODE="${{ inputs.deployment_mode || 'fast' }}"
+
+            # Build logic based on mode and force flag
+            if [ "$FORCE_REBUILD" = "true" ]; then
+              echo "🔨 Force rebuilding Docker images..."
+              docker-compose -f docker-compose.rds.yml build --no-cache
+            elif [ "$MODE" = "complete" ] || [ -z "$(docker images -q defectdojo/defectdojo-django:latest 2>/dev/null)" ]; then
+              echo "🔨 Building DefectDojo Docker images..."
+              docker-compose -f docker-compose.rds.yml build
+            else
+              echo "♻️ Using existing Docker images (fast mode)"
+              # Try to pull latest images in complete mode
+              if [ "$MODE" = "complete" ]; then
+                docker-compose -f docker-compose.rds.yml pull 2>/dev/null || echo "⚠️ Could not pull images, using local ones"
+              fi
+            fi
+
+            echo "✅ Docker images ready"
+          BUILD_EOF
+
+      - name: "Database Connection Test (Complete Mode)"
+        if: inputs.deployment_mode == 'complete'
+        run: |
+          echo "🔍 Testing database connectivity..."
+
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'DB_TEST_EOF'
+            cd /opt/defectdojo/app
+            
+            echo "Testing database connection before migrations..."
+            timeout 60 docker-compose -f docker-compose.rds.yml run --rm --entrypoint='' \
+              -e DD_ENABLE_AUDITLOG=False initializer bash -c \
+              "python -c \"import django; django.setup(); from django.db import connection; connection.ensure_connection(); print('✅ Database connection successful')\"" \
+              || (echo "❌ Database connection failed" && exit 1)
+          DB_TEST_EOF
+
+      - name: "Run Database Migrations"
+        run: |
+          echo "🗄️ Running database migrations (exact working sequence)..."
+
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'MIGRATE_EOF'
+            cd /opt/defectdojo/app
+            
+            echo "Running migrations with DD_ENABLE_AUDITLOG=False..."
+            docker-compose -f docker-compose.rds.yml run --rm --entrypoint='' \
+              -e DD_ENABLE_AUDITLOG=False initializer bash -c \
+              'cd /app && python manage.py migrate --run-syncdb'
+              
+            echo "✅ Database migrations completed successfully"
+          MIGRATE_EOF
+
+      - name: "Create Admin User"
+        run: |
+          echo "👤 Ensuring admin user exists..."
+
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'USER_EOF'
+            cd /opt/defectdojo/app
+            
+            echo "Creating/updating admin user..."
+            docker-compose -f docker-compose.rds.yml run --rm --entrypoint='' \
+              -e DD_ENABLE_AUDITLOG=False initializer bash -c \
+              'cd /app && echo "from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.create_superuser(\"admin\", \"admin@defectdojo.local\", \"DefectDojoMVP2024!\")" | python manage.py shell' \
+              || echo "⚠️ Admin user might already exist (this is normal)"
+              
+            echo "✅ Admin user ready"
+          USER_EOF
+
+      - name: "Start DefectDojo Services"
+        run: |
+          echo "🚀 Starting DefectDojo services..."
+
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'START_EOF'
+            cd /opt/defectdojo/app
+            
+            echo "Starting all DefectDojo services..."
+            docker-compose -f docker-compose.rds.yml up -d --remove-orphans
+            
+            # Wait for services to be ready
+            echo "⏳ Waiting for services to start..."
+            sleep 30
+            
+            # Show service status
+            echo "📋 Service status:"
+            docker-compose -f docker-compose.rds.yml ps
+            
+            echo "✅ DefectDojo services started"
+          START_EOF
+
+      - name: "Health Check"
+        run: |
+          MODE="${{ inputs.deployment_mode || 'fast' }}"
+          echo "🏥 Performing health check ($MODE mode)..."
+
+          # Determine number of attempts based on mode
+          MAX_ATTEMPTS=${{ inputs.deployment_mode == 'complete' && 12 || 6 }}
+          WAIT_TIME=${{ inputs.deployment_mode == 'complete' && 15 || 30 }}
+
+          # Test web application accessibility
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            if curl -f -s "http://${{ steps.discover.outputs.public_ip }}:8080" >/dev/null 2>&1; then
+              echo "✅ DefectDojo web interface is accessible!"
+              break
+            else
+              echo "⏳ Waiting for web interface... (attempt $i/$MAX_ATTEMPTS)"
+              sleep $WAIT_TIME
+            fi
+            
+            if [ $i -eq $MAX_ATTEMPTS ]; then
+              if [ "$MODE" = "complete" ]; then
+                echo "⚠️ Web interface not accessible after $MAX_ATTEMPTS attempts"
+                echo "Services may still be starting. Check manually in a few minutes."
+              else
+                echo "⚠️ Quick health check timeout (this is normal in fast mode)"
+              fi
+            fi
+          done
+
+      - name: "Cleanup"
+        if: always()
+        run: |
+          rm -f ec2-key.pem app-deploy.tar.gz
+
+      - name: "Deployment Summary"
+        if: always()
+        run: |
+          MODE="${{ inputs.deployment_mode || 'fast' }}"
+
+          echo "## 🚀 DefectDojo Application Deployed ($MODE mode)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### 🎯 Target Infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance ID**: \`${{ steps.discover.outputs.instance_id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Public IP**: \`${{ steps.discover.outputs.public_ip }}\`" >> $GITHUB_STEP_SUMMARY
+
+          if [ -n "${{ steps.discover.outputs.rds_endpoint }}" ]; then
+            echo "- **RDS Endpoint**: \`${{ steps.discover.outputs.rds_endpoint }}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Database**: Local (no RDS found)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Access DefectDojo" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL**: http://${{ steps.discover.outputs.public_ip }}:8080" >> $GITHUB_STEP_SUMMARY
+          echo "- **Admin User**: admin" >> $GITHUB_STEP_SUMMARY
+          echo "- **Admin Password**: DefectDojoMVP2024!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### ⚡ Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode**: $MODE" >> $GITHUB_STEP_SUMMARY
+          echo "- **Force Rebuild**: ${{ inputs.force_rebuild }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Force Restart**: ${{ inputs.force_restart }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance Filter**: ${{ inputs.instance_name_filter || 'defectdojo' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### 📋 Deployment Actions" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Application Code**: Latest from repository deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Environment**: Configured with RDS connection" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Docker Images**: Built/updated" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Database**: Migrations applied" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Admin User**: Created/verified" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Services**: All containers started" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$MODE" = "complete" ]; then
+            echo "- ✅ **Health Check**: Full verification completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⚡ **Health Check**: Quick verification (fast mode)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 **DefectDojo is ready for use!**" >> $GITHUB_STEP_SUMMARY

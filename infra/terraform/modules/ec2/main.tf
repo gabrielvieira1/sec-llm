@@ -37,7 +37,7 @@ resource "aws_instance" "defectdojo" {
   iam_instance_profile   = var.iam_instance_profile_name
 
   user_data_base64 = base64encode(replace(
-    file("${path.module}/user_data.sh"),
+    file("${path.module}/user_data_simple.sh"),
     "PROJECT_NAME_PLACEHOLDER",
     var.project_name
   ))
@@ -53,44 +53,4 @@ resource "aws_instance" "defectdojo" {
     Name = "${var.project_name}-defectdojo"
     Type = "DefectDojo Server"
   })
-}
-
-# S3 bucket for DefectDojo file uploads
-resource "aws_s3_bucket" "defectdojo_uploads" {
-  bucket = "${var.project_name}-defectdojo-uploads-${random_id.bucket_suffix.hex}"
-
-  tags = merge(var.tags, {
-    Purpose = "DefectDojo file uploads"
-  })
-}
-
-# Random suffix for S3 bucket name uniqueness
-resource "random_id" "bucket_suffix" {
-  byte_length = 4
-}
-
-resource "aws_s3_bucket_versioning" "defectdojo_uploads" {
-  bucket = aws_s3_bucket.defectdojo_uploads.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "defectdojo_uploads" {
-  bucket = aws_s3_bucket.defectdojo_uploads.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "defectdojo_uploads" {
-  bucket = aws_s3_bucket.defectdojo_uploads.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
 }

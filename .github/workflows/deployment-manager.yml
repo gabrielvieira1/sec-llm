@@ -1,0 +1,214 @@
+name: DefectDojo Deployment Manager
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_type:
+        description: "Choose what to deploy"
+        required: true
+        type: choice
+        options:
+          - "infrastructure-only" # Apenas Terraform (EC2 + RDS)
+          - "application-only" # Apenas aplicação Docker (rápido)
+          - "application-full" # Aplicação completa com todas verificações
+          - "full-deployment" # Infraestrutura + Aplicação completa
+        default: "application-only"
+
+      # Opções para Infraestrutura (Terraform)
+      terraform_action:
+        description: "Terraform action (for infrastructure deployments)"
+        required: false
+        type: choice
+        options:
+          - "plan"
+          - "apply"
+          - "destroy"
+        default: "apply"
+
+      terraform_auto_approve:
+        description: "Auto approve Terraform (skip manual approval)"
+        required: false
+        default: false
+        type: boolean
+
+      # Opções para Aplicação
+      instance_name_filter:
+        description: "EC2 Instance name filter"
+        required: false
+        default: "defectdojo"
+        type: string
+
+      force_rebuild:
+        description: "Force rebuild Docker images"
+        required: false
+        default: false
+        type: boolean
+
+      force_restart:
+        description: "Force restart DefectDojo services"
+        required: false
+        default: false
+        type: boolean
+
+      # Opções avançadas
+      skip_health_checks:
+        description: "Skip health checks (faster deployment)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_DEFAULT_REGION: us-east-1
+
+jobs:
+  # Job 1: Deploy Infrastructure (Terraform)
+  deploy_infrastructure:
+    name: "Deploy Infrastructure (Terraform)"
+    if: |
+      inputs.deployment_type == 'infrastructure-only' || 
+      inputs.deployment_type == 'full-deployment'
+    uses: ./.github/workflows/terraform-deploy.yml
+    with:
+      action: ${{ inputs.terraform_action }}
+      auto_approve: ${{ inputs.terraform_auto_approve }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+  # Job 2: Deploy Application (Fast)
+  deploy_application_fast:
+    name: "Deploy Application (Fast)"
+    if: inputs.deployment_type == 'application-only'
+    uses: ./.github/workflows/app-deploy-unified.yml
+    with:
+      deployment_mode: "fast"
+      instance_name_filter: ${{ inputs.instance_name_filter }}
+      force_rebuild: ${{ inputs.force_rebuild }}
+      force_restart: ${{ inputs.force_restart }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      EC2_PRIVATE_KEY: ${{ secrets.EC2_PRIVATE_KEY }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+  # Job 3: Deploy Application (Full)
+  deploy_application_full:
+    name: "Deploy Application (Full)"
+    if: |
+      always() && (
+        inputs.deployment_type == 'application-full' || 
+        inputs.deployment_type == 'full-deployment'
+      )
+    needs: [deploy_infrastructure]
+    uses: ./.github/workflows/app-deploy-unified.yml
+    with:
+      deployment_mode: "complete"
+      ec2_instance_id: ${{ needs.deploy_infrastructure.outputs.ec2_instance_id || '' }}
+      ec2_public_ip: ${{ needs.deploy_infrastructure.outputs.ec2_public_ip || '' }}
+      rds_endpoint: ${{ needs.deploy_infrastructure.outputs.rds_endpoint || '' }}
+      instance_name_filter: ${{ inputs.instance_name_filter }}
+      force_rebuild: ${{ inputs.force_rebuild }}
+      force_restart: ${{ inputs.force_restart }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      EC2_PRIVATE_KEY: ${{ secrets.EC2_PRIVATE_KEY }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+  # Job 4: Deployment Summary
+  deployment_summary:
+    name: "Deployment Summary"
+    needs:
+      [deploy_infrastructure, deploy_application_fast, deploy_application_full]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Create Comprehensive Summary"
+        run: |
+          echo "## 🎯 DefectDojo Deployment Manager - Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployment Type**: ${{ inputs.deployment_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered By**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Date**: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Infrastructure Status
+          if [ "${{ inputs.deployment_type }}" == "infrastructure-only" ] || [ "${{ inputs.deployment_type }}" == "full-deployment" ]; then
+            if [ "${{ needs.deploy_infrastructure.result }}" == "success" ]; then
+              echo "✅ **Infrastructure Deployment**: Success" >> $GITHUB_STEP_SUMMARY
+              if [ -n "${{ needs.deploy_infrastructure.outputs.ec2_instance_id }}" ]; then
+                echo "- EC2 Instance: \`${{ needs.deploy_infrastructure.outputs.ec2_instance_id }}\`" >> $GITHUB_STEP_SUMMARY
+                echo "- Public IP: \`${{ needs.deploy_infrastructure.outputs.ec2_public_ip }}\`" >> $GITHUB_STEP_SUMMARY
+                echo "- RDS Endpoint: \`${{ needs.deploy_infrastructure.outputs.rds_endpoint }}\`" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "❌ **Infrastructure Deployment**: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Application Status
+          if [ "${{ inputs.deployment_type }}" == "application-only" ]; then
+            if [ "${{ needs.deploy_application_fast.result }}" == "success" ]; then
+              echo "⚡ **Fast Application Deployment**: Success" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Fast Application Deployment**: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+          elif [ "${{ inputs.deployment_type }}" == "application-full" ] || [ "${{ inputs.deployment_type }}" == "full-deployment" ]; then
+            if [ "${{ needs.deploy_application_full.result }}" == "success" ]; then
+              echo "✅ **Full Application Deployment**: Success" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Full Application Deployment**: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Access Information
+          INSTANCE_IP=""
+          if [ -n "${{ needs.deploy_infrastructure.outputs.ec2_public_ip }}" ]; then
+            INSTANCE_IP="${{ needs.deploy_infrastructure.outputs.ec2_public_ip }}"
+          elif [ -n "${{ needs.deploy_application_fast.outputs.public_ip }}" ]; then
+            INSTANCE_IP="${{ needs.deploy_application_fast.outputs.public_ip }}"
+          fi
+
+          if [ -n "$INSTANCE_IP" ]; then
+            echo "### 🌐 Access DefectDojo" >> $GITHUB_STEP_SUMMARY
+            echo "- **URL**: http://$INSTANCE_IP:8080" >> $GITHUB_STEP_SUMMARY
+            echo "- **Admin User**: admin" >> $GITHUB_STEP_SUMMARY
+            echo "- **Admin Password**: DefectDojoMVP2024!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Deployment Options Used
+          echo "### ⚙️ Deployment Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Type**: ${{ inputs.deployment_type }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.deployment_type }}" != "infrastructure-only" ]; then
+            echo "- **Force Rebuild**: ${{ inputs.force_rebuild }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Force Restart**: ${{ inputs.force_restart }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Skip Health Checks**: ${{ inputs.skip_health_checks }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Instance Filter**: ${{ inputs.instance_name_filter }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.deployment_type }}" != "application-only" ] && [ "${{ inputs.deployment_type }}" != "application-full" ]; then
+            echo "- **Terraform Action**: ${{ inputs.terraform_action }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Auto Approve**: ${{ inputs.terraform_auto_approve }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Next Steps" >> $GITHUB_STEP_SUMMARY
+          case "${{ inputs.deployment_type }}" in
+            "infrastructure-only")
+              echo "- Run **application-only** or **application-full** deployment to deploy DefectDojo" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "application-only")
+              echo "- DefectDojo is ready for use (fast deployment)" >> $GITHUB_STEP_SUMMARY
+              echo "- For full features, consider **application-full** deployment" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "application-full"|"full-deployment")
+              echo "- DefectDojo is ready for production use" >> $GITHUB_STEP_SUMMARY
+              echo "- All features and health checks completed" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
