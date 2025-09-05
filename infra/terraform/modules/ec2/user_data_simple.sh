@@ -16,6 +16,18 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get upgrade -y
 
+# Create swap file for better performance on small instances (t3.micro)
+echo "Setting up swap file for improved performance..."
+fallocate -l 2G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
+
+# Optimize swap usage
+echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf
+echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf
+
 # Install essential infrastructure packages
 echo "Installing essential packages..."
 apt-get install -y \

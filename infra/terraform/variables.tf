@@ -1,5 +1,4 @@
 # DefectDojo MVP Variables - Simplified EC2 Architecture
-
 variable "project_name" {
   description = "Name of the project"
   type        = string
@@ -30,5 +29,5 @@ variable "db_password" {
 variable "instance_type" {
   description = "EC2 instance type for DefectDojo server"
   type        = string
-  default     = "t3.large" # Upgraded from t3.small for Docker builds
+  default     = "t3.medium" # Free Tier  (2 vCPU, 4 GB RAM)
 }
