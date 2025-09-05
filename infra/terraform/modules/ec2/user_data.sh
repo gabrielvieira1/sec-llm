@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# DefectDojo Installation Script for Ubuntu 24.04
+# DefectDojo Installation Script for Ubuntu 22.04 LTS
 # This script installs Docker, Docker Compose, and sets up DefectDojo
 
 set -e

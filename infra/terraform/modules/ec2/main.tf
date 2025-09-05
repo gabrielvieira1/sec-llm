@@ -1,19 +1,24 @@
 # EC2 Module for DefectDojo - Simplified Single Instance
 # This module creates a single EC2 instance with DefectDojo installed via Docker
 
-# Data source to get the latest Ubuntu 24.04 LTS AMI
+# Data source to get the latest Ubuntu 22.04 LTS AMI (more stable and widely available)
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-24.04-amd64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
 
   filter {
     name   = "virtualization-type"
     values = ["hvm"]
+  }
+
+  filter {
+    name   = "state"
+    values = ["available"]
   }
 }
 
