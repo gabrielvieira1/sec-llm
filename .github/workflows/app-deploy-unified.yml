@@ -173,16 +173,28 @@ jobs:
         if: inputs.deployment_mode == 'complete'
         run: |
           echo "⏳ Waiting for EC2 instance to be ready (complete mode)..."
+          echo "Instance IP: ${{ steps.discover.outputs.public_ip }}"
+          echo "Instance ID: ${{ steps.discover.outputs.instance_id }}"
 
-          # Test SSH connectivity
-          for i in {1..10}; do
-            if ssh -i ec2-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ec2-user@${{ steps.discover.outputs.public_ip }} "echo 'SSH connection successful'" 2>/dev/null; then
+          # Test SSH connectivity with Ubuntu user
+          for i in {1..15}; do
+            if ssh -i ec2-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@${{ steps.discover.outputs.public_ip }} "echo 'SSH connection successful'" 2>/dev/null; then
               echo "✅ SSH connection established!"
               break
             fi
-            echo "Waiting for SSH connectivity... (attempt $i/10)"
-            sleep 15
+            echo "Waiting for SSH connectivity... (attempt $i/15)"
+            
+            # Show instance status on AWS
+            if [ $i -eq 5 ] || [ $i -eq 10 ]; then
+              echo "🔍 Checking instance status on AWS..."
+              aws ec2 describe-instance-status --instance-ids ${{ steps.discover.outputs.instance_id }} --query 'InstanceStatuses[0].[InstanceStatus.Status,SystemStatus.Status]' --output text || echo "Instance status check failed"
+            fi
+            
+            sleep 20
           done
+
+          # Final verification
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ubuntu@${{ steps.discover.outputs.public_ip }} "whoami && uptime" || (echo "❌ SSH still not working" && exit 1)
 
       - name: "Deploy Application Code"
         run: |
@@ -193,10 +205,10 @@ jobs:
           tar -czf app-deploy.tar.gz app/
 
           # Copy to EC2
-          scp -i ec2-key.pem -o StrictHostKeyChecking=no app-deploy.tar.gz ec2-user@${{ steps.discover.outputs.public_ip }}:/tmp/
+          scp -i ec2-key.pem -o StrictHostKeyChecking=no app-deploy.tar.gz ubuntu@${{ steps.discover.outputs.public_ip }}:/tmp/
 
           # Deploy application
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'DEPLOY_EOF'
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ubuntu@${{ steps.discover.outputs.public_ip }} << 'DEPLOY_EOF'
             echo "🚀 Starting $MODE deployment..."
             
             # Stop existing containers if running
@@ -213,7 +225,7 @@ jobs:
             sudo mkdir -p /opt/defectdojo
             cd /opt/defectdojo
             sudo tar -xzf /tmp/app-deploy.tar.gz
-            sudo chown -R ec2-user:ec2-user /opt/defectdojo
+            sudo chown -R ubuntu:ubuntu /opt/defectdojo
             rm /tmp/app-deploy.tar.gz
             
             # Verify extraction
@@ -227,7 +239,7 @@ jobs:
         run: |
           echo "⚙️ Configuring DefectDojo environment..."
 
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'CONFIG_EOF'
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ubuntu@${{ steps.discover.outputs.public_ip }} << 'CONFIG_EOF'
             cd /opt/defectdojo/app
             
             # Create environment configuration
@@ -264,7 +276,7 @@ jobs:
 
           echo "🐳 Managing Docker images ($MODE mode, force_rebuild: $FORCE_REBUILD)..."
 
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'BUILD_EOF'
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ubuntu@${{ steps.discover.outputs.public_ip }} << 'BUILD_EOF'
             cd /opt/defectdojo/app
             
             FORCE_REBUILD="${{ inputs.force_rebuild }}"
@@ -293,7 +305,7 @@ jobs:
         run: |
           echo "🔍 Testing database connectivity..."
 
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'DB_TEST_EOF'
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ubuntu@${{ steps.discover.outputs.public_ip }} << 'DB_TEST_EOF'
             cd /opt/defectdojo/app
             
             echo "Testing database connection before migrations..."
@@ -307,7 +319,7 @@ jobs:
         run: |
           echo "🗄️ Running database migrations (exact working sequence)..."
 
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'MIGRATE_EOF'
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ubuntu@${{ steps.discover.outputs.public_ip }} << 'MIGRATE_EOF'
             cd /opt/defectdojo/app
             
             echo "Running migrations with DD_ENABLE_AUDITLOG=False..."
@@ -322,7 +334,7 @@ jobs:
         run: |
           echo "👤 Ensuring admin user exists..."
 
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'USER_EOF'
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ubuntu@${{ steps.discover.outputs.public_ip }} << 'USER_EOF'
             cd /opt/defectdojo/app
             
             echo "Creating/updating admin user..."
@@ -338,7 +350,7 @@ jobs:
         run: |
           echo "🚀 Starting DefectDojo services..."
 
-          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ec2-user@${{ steps.discover.outputs.public_ip }} << 'START_EOF'
+          ssh -i ec2-key.pem -o StrictHostKeyChecking=no ubuntu@${{ steps.discover.outputs.public_ip }} << 'START_EOF'
             cd /opt/defectdojo/app
             
             echo "Starting all DefectDojo services..."
