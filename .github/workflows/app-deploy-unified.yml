@@ -284,11 +284,13 @@ jobs:
 
             # Build logic based on mode and force flag
             if [ "$FORCE_REBUILD" = "true" ]; then
-              echo "🔨 Force rebuilding Docker images..."
-              docker-compose -f docker-compose.rds.yml build --no-cache
+              echo "🔨 Force rebuilding Docker images (optimized for stability)..."
+              # Use parallel jobs limit to prevent overload
+              docker-compose -f docker-compose.rds.yml build --no-cache --parallel 2
             elif [ "$MODE" = "complete" ] || [ -z "$(docker images -q defectdojo/defectdojo-django:latest 2>/dev/null)" ]; then
-              echo "🔨 Building DefectDojo Docker images..."
-              docker-compose -f docker-compose.rds.yml build
+              echo "🔨 Building DefectDojo Docker images (optimized for stability)..."
+              # Use parallel jobs limit and memory constraints
+              docker-compose -f docker-compose.rds.yml build --parallel 2
             else
               echo "♻️ Using existing Docker images (fast mode)"
               # Try to pull latest images in complete mode

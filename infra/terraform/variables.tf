@@ -30,5 +30,5 @@ variable "db_password" {
 variable "instance_type" {
   description = "EC2 instance type for DefectDojo server"
   type        = string
-  default     = "t3.small"
+  default     = "t3.large" # Upgraded from t3.small for Docker builds
 }

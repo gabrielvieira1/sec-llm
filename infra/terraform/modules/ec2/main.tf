@@ -44,7 +44,7 @@ resource "aws_instance" "defectdojo" {
 
   root_block_device {
     volume_type           = "gp3"
-    volume_size           = 20
+    volume_size           = 30 # Increased from 20GB for Docker images
     delete_on_termination = true
     encrypted             = true
   }
