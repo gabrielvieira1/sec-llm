@@ -282,17 +282,26 @@ jobs:
             FORCE_REBUILD="${{ inputs.force_rebuild }}"
             MODE="${{ inputs.deployment_mode || 'fast' }}"
 
-            # Build logic based on mode and force flag - optimized for small instances
+            # Build logic optimized for t3.micro (1 vCPU, 1GB RAM)
+            echo "⚙️ Optimizing system for low-memory build..."
+            
+            # Clear Docker cache to free memory
+            docker system prune -f 2>/dev/null || true
+            
+            # Show memory status
+            echo "💾 Memory status before build:"
+            free -h
+            
             if [ "$FORCE_REBUILD" = "true" ]; then
-              echo "🔨 Force rebuilding Docker images (memory-optimized for small instances)..."
-              # Sequential build to avoid memory overload on t3.micro/small instances
+              echo "🔨 Force rebuilding Docker images (t3.micro optimized)..."
+              # Build one service at a time to minimize memory usage
               docker-compose -f docker-compose.rds.yml build --no-cache --parallel 1
             elif [ "$MODE" = "complete" ] || [ -z "$(docker images -q defectdojo/defectdojo-django:latest 2>/dev/null)" ]; then
-              echo "🔨 Building DefectDojo Docker images (memory-optimized for small instances)..."
-              # Sequential build for better stability on small instances
+              echo "🔨 Building DefectDojo Docker images (t3.micro optimized)..."
+              # Sequential build with memory monitoring
               docker-compose -f docker-compose.rds.yml build --parallel 1
             else
-              echo "♻️ Using existing Docker images (fast mode)"
+              echo "♻️ Using existing Docker images (fast mode - no build needed)"
               # Try to pull latest images in complete mode
               if [ "$MODE" = "complete" ]; then
                 docker-compose -f docker-compose.rds.yml pull 2>/dev/null || echo "⚠️ Could not pull images, using local ones"
