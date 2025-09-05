@@ -50,3 +50,14 @@ node_modules/
 # Build outputs
 dist/
 build/
+
+# Security - SSH Keys and Certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+ssh_host_*
+*.pub
