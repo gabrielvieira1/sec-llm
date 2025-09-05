@@ -59,7 +59,7 @@ git clone https://github.com/DefectDojo/django-DefectDojo.git .
 # Wait for database URL to be available in SSM
 echo "Waiting for database URL in SSM Parameter Store..."
 for i in {1..30}; do
-    if DB_URL=$(aws ssm get-parameter --name "${project_name}-database-url" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null); then
+    if DB_URL=$(aws ssm get-parameter --name "PROJECT_NAME_PLACEHOLDER-database-url" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null); then
         echo "Database URL retrieved successfully"
         break
     else
@@ -78,7 +78,6 @@ cat > .env.prod << EOF
 # DefectDojo Production Configuration
 DD_DEBUG=False
 DD_ALLOWED_HOSTS=*
-DD_DATABASE_URL=${DB_URL}
 DD_SECRET_KEY=$(openssl rand -base64 32)
 DD_CREDENTIAL_AES_256_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 
@@ -113,6 +112,9 @@ DD_ADMIN_PASSWORD=DefectDojoMVP2024!
 DD_ADMIN_FIRST_NAME=Admin
 DD_ADMIN_LAST_NAME=User
 EOF
+
+# Add database URL to environment file
+echo "DD_DATABASE_URL=${DB_URL}" >> .env.prod
 
 # Create docker-compose.override.yml for production
 cat > docker-compose.override.yml << 'EOF'
