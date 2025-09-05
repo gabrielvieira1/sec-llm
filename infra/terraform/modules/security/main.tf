@@ -159,6 +159,26 @@ resource "aws_iam_role_policy_attachment" "ecs_instance_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
 }
 
+# IAM policy for EC2 to access SSM parameters
+resource "aws_iam_role_policy" "ec2_ssm_policy" {
+  name = "${var.project_name}-ec2-ssm-policy"
+  role = aws_iam_role.ecs_instance_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+        Resource = "arn:aws:ssm:*:*:parameter/${var.project_name}-database-url"
+      }
+    ]
+  })
+}
+
 # Instance profile for EC2
 resource "aws_iam_instance_profile" "ecs_instance_profile" {
   name = "${var.project_name}-ecs-instance-profile"

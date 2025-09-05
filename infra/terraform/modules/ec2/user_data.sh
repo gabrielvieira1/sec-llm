@@ -68,8 +68,8 @@ for i in {1..30}; do
     fi
     
     if [ $i -eq 30 ]; then
-        echo "Failed to get database URL from SSM"
-        DB_URL="postgresql://defectdojo:${database_url}@localhost:5432/defectdojo"
+        echo "Failed to get database URL from SSM after 30 attempts. Exiting."
+        exit 1
     fi
 done
 
@@ -78,7 +78,7 @@ cat > .env.prod << EOF
 # DefectDojo Production Configuration
 DD_DEBUG=False
 DD_ALLOWED_HOSTS=*
-DD_DATABASE_URL=${database_url}
+DD_DATABASE_URL=${DB_URL}
 DD_SECRET_KEY=$(openssl rand -base64 32)
 DD_CREDENTIAL_AES_256_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 

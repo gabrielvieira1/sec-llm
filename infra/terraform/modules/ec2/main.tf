@@ -38,7 +38,6 @@ resource "aws_instance" "defectdojo" {
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
     project_name = var.project_name
-    database_url = var.database_url
   }))
 
   root_block_device {
