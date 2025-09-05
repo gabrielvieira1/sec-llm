@@ -6,6 +6,25 @@
 
 set -e
 
+
+# =================================================
+# CONFIGURE SWAP FOR LOW MEMORY INSTANCE
+# =================================================
+# Create a 4GB swap file
+sudo fallocate -l 4G /swapfile
+# Set correct permissions
+sudo chmod 600 /swapfile
+# Set up the swap space
+sudo mkswap /swapfile
+# Enable the swap space
+sudo swapon /swapfile
+# Make the swap file permanent so it survives reboots
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+# Verify swap is active
+sudo swapon --show
+free -h
+# =================================================
+
 # Redirect output to log file
 exec > >(tee /var/log/infrastructure-setup.log) 2>&1
 
