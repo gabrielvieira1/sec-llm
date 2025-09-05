@@ -6,25 +6,6 @@
 
 set -e
 
-
-# =================================================
-# CONFIGURE SWAP FOR LOW MEMORY INSTANCE
-# =================================================
-# Create a 4GB swap file
-sudo fallocate -l 4G /swapfile
-# Set correct permissions
-sudo chmod 600 /swapfile
-# Set up the swap space
-sudo mkswap /swapfile
-# Enable the swap space
-sudo swapon /swapfile
-# Make the swap file permanent so it survives reboots
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-# Verify swap is active
-sudo swapon --show
-free -h
-# =================================================
-
 # Redirect output to log file
 exec > >(tee /var/log/infrastructure-setup.log) 2>&1
 
@@ -35,8 +16,15 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get upgrade -y
 
+# Create swap file for better performance on small instances (t3.micro)
+echo "Setting up swap file for improved performance..."
+fallocate -l 4G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
+
 # Optimize swap usage
-echo "Optimizing swap usage..."
 echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf
 echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf
 
